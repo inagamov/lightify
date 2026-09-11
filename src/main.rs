@@ -11,11 +11,21 @@ async fn main() -> anyhow::Result<()> {
 
     let login = spotify::auth::login(&cache_dir, &cfg.client_id).await?;
     spotify::auth::connect(&login.session, login.credentials).await?;
-    println!("connected as {}", login.session.username());
-    println!(
-        "web api token ok, expires at {}",
-        login.web_token.expires_at
-    );
+
+    let api = spotify::api::SpotifyApi::new(cfg.client_id.clone(), cache_dir, login.web_token);
+
+    let playlists = api.my_playlists().await?;
+    println!("{} playlists", playlists.len());
+
+    if let Some(first) = playlists.first() {
+        let page = api.playlist_tracks(&first.id).await?;
+        println!(
+            "{}: {} tracks on page 1, more: {}",
+            first.name,
+            page.tracks.len(),
+            page.next.is_some()
+        );
+    }
 
     let mut terminal = ratatui::init();
     let result = run(&mut terminal);

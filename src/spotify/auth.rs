@@ -156,7 +156,7 @@ pub fn save_web_token(cache_dir: &Path, token: &WebToken) -> Result<(), AuthErro
 }
 
 fn load_web_token(cache_dir: &Path) -> Result<Option<WebToken>, AuthError> {
-    let token = match std::fs::read_to_string(&cache_dir.join(WEB_TOKEN_FILE)) {
+    let token = match std::fs::read_to_string(cache_dir.join(WEB_TOKEN_FILE)) {
         Ok(token) => token,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(None);

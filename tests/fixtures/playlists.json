@@ -4,7 +4,7 @@
       "id": "37i9dQZEVXcJZyENOWUFo7",
       "uri": "spotify:playlist:37i9dQZEVXcJZyENOWUFo7",
       "name": "Discover Weekly",
-      "tracks": {
+      "items": {
         "href": "https://api.spotify.com/v1/playlists/37i9dQZEVXcJZyENOWUFo7/tracks",
         "total": 30
       },
@@ -17,7 +17,7 @@
       "id": "1a2b3c",
       "uri": "spotify:playlist:1a2b3c",
       "name": "Late Night",
-      "tracks": {
+      "items": {
         "href": "https://api.spotify.com/v1/playlists/1a2b3c/tracks",
         "total": 112
       },

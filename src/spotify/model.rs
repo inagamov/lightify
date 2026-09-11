@@ -10,6 +10,7 @@ pub struct Page<T> {
 pub struct Playlist {
     pub id: String,
     pub name: String,
+    #[serde(rename = "items")]
     pub tracks: TrackCount,
 }
 
@@ -20,6 +21,7 @@ pub struct TrackCount {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlaylistItem {
+    #[serde(rename = "item")]
     pub track: Option<Track>,
 }
 

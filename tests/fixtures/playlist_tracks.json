@@ -2,7 +2,7 @@
   "items": [
     {
       "added_at": "2024-01-01T00:00:00Z",
-      "track": {
+      "item": {
         "uri": "spotify:track:10Nmj3JCNoMeBQ87uw5j8k",
         "name": "Dani California",
         "duration_ms": 282160,
@@ -19,11 +19,11 @@
     },
     {
       "added_at": "2024-01-02T00:00:00Z",
-      "track": null
+      "item": null
     },
     {
       "added_at": "2024-01-03T00:00:00Z",
-      "track": {
+      "item": {
         "uri": "spotify:track:2aoo2jlRnM3A0NyLeDAhIu",
         "name": "Under the Bridge",
         "duration_ms": 264306,
@@ -43,7 +43,7 @@
     },
     {
       "added_at": "2024-01-04T00:00:00Z",
-      "track": {
+      "item": {
         "uri": "spotify:episode:5Xt5DXGzch68nYYamXrNxZ",
         "name": "Some podcast episode",
         "duration_ms": 1800000,
