@@ -70,12 +70,17 @@ impl App {
         self.sidebar.selected().and_then(|i| self.playlists.get(i))
     }
 
-    pub fn selected_tracks(&self) -> Option<&Track> {
+    pub fn selected_track(&self) -> Option<&Track> {
         self.track_list.selected().and_then(|i| self.tracks.get(i))
     }
 
     pub fn is_showing(&self, playlist_id: &str) -> bool {
         self.tracks_for.as_deref() == Some(playlist_id)
+    }
+
+    pub fn showing_playlist(&self) -> Option<&Playlist> {
+        let id = self.tracks_for.as_deref()?;
+        self.playlists.iter().find(|p| p.id == id)
     }
 }
 
