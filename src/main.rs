@@ -1,5 +1,9 @@
+mod action;
+mod app;
 mod config;
+mod message;
 mod spotify;
+
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::DefaultTerminal;
 use ratatui::widgets::Paragraph;
