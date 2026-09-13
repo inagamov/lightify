@@ -148,7 +148,6 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
             app.status = Some(error.to_string());
             Vec::new()
         }
-
         Message::Tracks {
             playlist_id,
             result,
@@ -166,7 +165,6 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
-
         Message::MoreTracks {
             playlist_id,
             result,
@@ -184,6 +182,7 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::Player(_) => Vec::new(),
     }
 }
 

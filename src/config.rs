@@ -18,12 +18,12 @@ pub enum ConfigError {
          http://127.0.0.1:5588/login"
     )]
     Missing(PathBuf),
-    #[error("Could not read {path}: {source}")]
+    #[error("could not read {path}: {source}")]
     Read {
         path: PathBuf,
         source: std::io::Error,
     },
-    #[error("Could not parse {path}: {source}")]
+    #[error("could not parse {path}: {source}")]
     Parse {
         path: PathBuf,
         source: toml::de::Error,

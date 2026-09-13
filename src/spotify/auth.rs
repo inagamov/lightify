@@ -8,9 +8,11 @@ use librespot_oauth::{OAuthClientBuilder, OAuthToken};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub const REDIRECT_URI: &str = "http://127.0.0.1:5588/login";
-pub const SCOPES: &[&str] = &[
-    "streaming",
+const PLAYBACK_REDIRECT_URI: &str = "http://127.0.0.1:8898/login";
+const PLAYBACK_SCOPES: &[&str] = &["streaming"];
+
+const WEB_REDIRECT_URI: &str = "http://127.0.0.1:5588/login";
+const WEB_SCOPES: &[&str] = &[
     "playlist-read-private",
     "playlist-read-collaborative",
     "user-library-read",
@@ -18,7 +20,6 @@ pub const SCOPES: &[&str] = &[
     "user-read-email",
 ];
 
-/// Refresh this many seconds before the token actually expires.
 const EXPIRY_MARGIN_SECS: u64 = 60;
 const WEB_TOKEN_FILE: &str = "web_token.json";
 
@@ -44,7 +45,6 @@ pub enum AuthError {
 pub struct WebToken {
     pub access_token: String,
     pub refresh_token: String,
-    /// Unix seconds.
     pub expires_at: u64,
 }
 
@@ -68,67 +68,60 @@ impl WebToken {
     }
 }
 
-pub struct Login {
+pub struct PlaybackLogin {
     pub session: Session,
     pub credentials: Credentials,
-    pub web_token: WebToken,
 }
 
-pub async fn login(cache_dir: &Path, client_id: &str) -> Result<Login, AuthError> {
+pub async fn playback_login(cache_dir: &Path) -> Result<PlaybackLogin, AuthError> {
     let cache =
         Cache::new(Some(cache_dir.to_path_buf()), None, None, None).map_err(AuthError::Cache)?;
+    let config = SessionConfig::default();
 
-    let cached_credentials = cache.credentials();
-
-    let config = SessionConfig {
-        client_id: client_id.to_string(),
-        ..Default::default()
+    let credentials = match cache.credentials() {
+        Some(credentials) => credentials,
+        None => {
+            let token =
+                browser_login(&config.client_id, PLAYBACK_REDIRECT_URI, PLAYBACK_SCOPES).await?;
+            Credentials::with_access_token(token.access_token)
+        }
     };
 
     let session = Session::new(config, Some(cache));
+    Ok(PlaybackLogin {
+        session,
+        credentials,
+    })
+}
 
-    let cached_web_token = match load_web_token(cache_dir)? {
-        Some(t) if !t.is_expiring() => Some(t),
-        Some(t) => match refresh_web_token(client_id, &t).await {
+pub async fn web_login(cache_dir: &Path, client_id: &str) -> Result<WebToken, AuthError> {
+    let cached = match load_web_token(cache_dir)? {
+        Some(token) if !token.is_expiring() => Some(token),
+        Some(token) => match refresh_web_token(client_id, &token).await {
             Ok(new_token) => Some(new_token),
             Err(error) => {
-                eprintln!("web token refresh failed: {error}");
+                tracing::warn!("web token refresh failed: {error}");
                 None
             }
         },
         None => None,
     };
 
-    let (credentials, web_token) = match (cached_credentials, cached_web_token) {
-        (Some(credentials), Some(web_token)) => (credentials, web_token),
-        (cached_credentials, cached_web_token) => {
-            let fresh = browser_login(client_id).await?;
-            (
-                cached_credentials
-                    .unwrap_or_else(|| Credentials::with_access_token(fresh.access_token.clone())),
-                cached_web_token.unwrap_or_else(|| WebToken::from_oauth(&fresh)),
-            )
+    let token = match cached {
+        Some(token) => token,
+        None => {
+            let response = browser_login(client_id, WEB_REDIRECT_URI, WEB_SCOPES).await?;
+            WebToken::from_oauth(&response)
         }
     };
 
-    save_web_token(cache_dir, &web_token)?;
-
-    Ok(Login {
-        session,
-        credentials,
-        web_token,
-    })
-}
-
-pub async fn connect(session: &Session, credentials: Credentials) -> Result<(), AuthError> {
-    session
-        .connect(credentials, true)
-        .await
-        .map_err(AuthError::Connect)
+    save_web_token(cache_dir, &token)?;
+    Ok(token)
 }
 
 pub async fn refresh_web_token(client_id: &str, token: &WebToken) -> Result<WebToken, AuthError> {
-    let client = OAuthClientBuilder::new(client_id, REDIRECT_URI, SCOPES.to_vec()).build()?;
+    let client =
+        OAuthClientBuilder::new(client_id, WEB_REDIRECT_URI, WEB_SCOPES.to_vec()).build()?;
     let response = client.refresh_token_async(&token.refresh_token).await?;
 
     let mut new_token = WebToken::from_oauth(&response);
@@ -170,8 +163,12 @@ fn load_web_token(cache_dir: &Path) -> Result<Option<WebToken>, AuthError> {
     Ok(Some(parsed_token))
 }
 
-async fn browser_login(client_id: &str) -> Result<OAuthToken, AuthError> {
-    let client = OAuthClientBuilder::new(client_id, REDIRECT_URI, SCOPES.to_vec())
+async fn browser_login(
+    client_id: &str,
+    redirect_uri: &str,
+    scopes: &[&str],
+) -> Result<OAuthToken, AuthError> {
+    let client = OAuthClientBuilder::new(client_id, redirect_uri, scopes.to_vec())
         .open_in_browser()
         .build()?;
 

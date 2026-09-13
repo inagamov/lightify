@@ -1,6 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Style, Stylize};
+use ratatui::style::Style;
 use ratatui::widgets::{Block, List};
 
 use crate::app::{App, Focus};

@@ -8,12 +8,14 @@ mod ui;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind};
 use futures::StreamExt;
 use ratatui::DefaultTerminal;
-use tokio::sync::mpsc::{self, UnboundedSender};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use action::Action;
 use app::{ApiRequest, App, Effect, Input, update};
 use message::Message;
 use spotify::api::SpotifyApi;
+
+use crate::spotify::player::PlayerCommand;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -30,21 +32,31 @@ async fn main() -> anyhow::Result<()> {
 
     let cfg = config::load()?;
 
-    let login = spotify::auth::login(&cache_dir, &cfg.client_id).await?;
-    spotify::auth::connect(&login.session, login.credentials).await?;
+    let playback = spotify::auth::playback_login(&cache_dir).await?;
+    let web_token = spotify::auth::web_login(&cache_dir, &cfg.client_id).await?;
 
-    let api = SpotifyApi::new(cfg.client_id.clone(), cache_dir, login.web_token);
+    let api = SpotifyApi::new(cfg.client_id.clone(), cache_dir, web_token);
+
+    let (tx, rx) = mpsc::unbounded_channel::<Message>();
+
+    let player =
+        spotify::player::start(playback.session.clone(), playback.credentials, tx.clone()).await?;
 
     let mut terminal = ratatui::init();
-    let result = run(&mut terminal, api).await;
+    let result = run(&mut terminal, api, player, tx, rx).await;
     ratatui::restore();
-    login.session.shutdown();
+    playback.session.shutdown();
     result
 }
 
-async fn run(terminal: &mut DefaultTerminal, api: SpotifyApi) -> anyhow::Result<()> {
+async fn run(
+    terminal: &mut DefaultTerminal,
+    api: SpotifyApi,
+    player: UnboundedSender<PlayerCommand>,
+    tx: UnboundedSender<Message>,
+    mut rx: UnboundedReceiver<Message>,
+) -> anyhow::Result<()> {
     let mut app = App::new();
-    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
 
     let mut events = EventStream::new();
 
@@ -53,7 +65,10 @@ async fn run(terminal: &mut DefaultTerminal, api: SpotifyApi) -> anyhow::Result<
     loop {
         for effect in pending.drain(..) {
             match effect {
-                Effect::Quit => return Ok(()),
+                Effect::Quit => {
+                    let _ = player.send(PlayerCommand::Shutdown);
+                    return Ok(());
+                }
                 Effect::Api(request) => spawn_api(request, api.clone(), tx.clone()),
             }
         }
