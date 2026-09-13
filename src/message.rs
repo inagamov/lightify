@@ -14,4 +14,5 @@ pub enum Message {
         result: Result<TracksPage, ApiError>,
     },
     Player(PlayerUpdate),
+    Tick,
 }

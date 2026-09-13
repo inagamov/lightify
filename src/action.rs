@@ -7,6 +7,13 @@ pub enum Action {
     FocusSidebar,
     FocusMain,
     Select,
+    PlayPause,
+    Next,
+    Prev,
+    SeekForward,
+    SeekBackward,
+    VolumeUp,
+    VolumeDown,
     Refresh,
     Quit,
 }

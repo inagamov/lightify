@@ -1,8 +1,11 @@
+use std::time::Instant;
+
 use ratatui::widgets::ListState;
 
 use crate::action::Action;
 use crate::message::Message;
 use crate::spotify::model::{Playlist, Track};
+use crate::spotify::player::{PlayerCommand, PlayerUpdate};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -32,21 +35,90 @@ pub enum ApiRequest {
 pub enum Effect {
     Api(ApiRequest),
     Quit,
+    Player(PlayerCommand),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Playback {
+    pub track: Option<NowPlaying>,
+    position_ms: u32,
+    position_at: Option<Instant>,
+    pub volume: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NowPlaying {
+    pub name: String,
+    pub artists: Vec<String>,
+    pub album: String,
+    pub duration_ms: u32,
+}
+
+impl Playback {
+    pub fn current_position_ms(&self) -> u32 {
+        match self.position_at {
+            Some(at) => {
+                let elapsed = u32::try_from(at.elapsed().as_millis()).unwrap_or(u32::MAX);
+                self.position_ms.saturating_add(elapsed)
+            }
+            None => self.position_ms,
+        }
+    }
+
+    pub fn apply(&mut self, update: PlayerUpdate) {
+        match update {
+            PlayerUpdate::TrackChanged {
+                name,
+                artists,
+                album,
+                duration_ms,
+            } => {
+                self.track = Some(NowPlaying {
+                    name,
+                    artists,
+                    album,
+                    duration_ms,
+                });
+            }
+            PlayerUpdate::Playing { position_ms } => {
+                self.position_ms = position_ms;
+                self.position_at = Some(Instant::now());
+            }
+            PlayerUpdate::Paused { position_ms } => {
+                self.position_ms = position_ms;
+                self.position_at = None;
+            }
+            PlayerUpdate::Seeked { position_ms } => {
+                self.position_ms = position_ms;
+                if self.position_at.is_some() {
+                    self.position_at = Some(Instant::now());
+                }
+            }
+            PlayerUpdate::Volume(volume) => self.volume = volume,
+            PlayerUpdate::Stopped => {
+                self.track = None;
+                self.position_ms = 0;
+                self.position_at = None;
+            }
+        }
+    }
+
+    pub fn is_playing(&self) -> bool {
+        self.position_at.is_some()
+    }
 }
 
 pub struct App {
     pub focus: Focus,
-
     pub playlists: Vec<Playlist>,
     pub sidebar: ListState,
-
     pub tracks: Vec<Track>,
     pub track_list: ListState,
     pub tracks_for: Option<String>,
     pub tracks_next: Option<String>,
     pub loading_more: bool,
-
     pub status: Option<String>,
+    pub playback: Playback,
 }
 
 impl App {
@@ -54,15 +126,14 @@ impl App {
         Self {
             focus: Focus::Sidebar,
             playlists: Vec::new(),
-
             sidebar: ListState::default().with_selected(Some(0)),
             tracks: Vec::new(),
             track_list: ListState::default(),
             tracks_for: None,
             tracks_next: None,
             loading_more: false,
-
             status: None,
+            playback: Playback::default(),
         }
     }
 
@@ -113,7 +184,6 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
             move_selection(state, len, isize::MAX);
             load_more_if_near_end(app)
         }
-
         Action::FocusSidebar => {
             app.focus = Focus::Sidebar;
             Vec::new()
@@ -122,12 +192,35 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
             app.focus = Focus::Main;
             Vec::new()
         }
-
         Action::Select => match app.focus {
             Focus::Sidebar => select_playlist(app),
-            Focus::Main => Vec::new(),
+            Focus::Main => play_selected(app),
         },
-
+        Action::PlayPause => vec![Effect::Player(PlayerCommand::PlayPause)],
+        Action::Next => vec![Effect::Player(PlayerCommand::Next)],
+        Action::Prev => vec![Effect::Player(PlayerCommand::Prev)],
+        Action::SeekForward => {
+            let target = app
+                .playback
+                .current_position_ms()
+                .saturating_add(SEEK_STEP_MS);
+            vec![Effect::Player(PlayerCommand::Seek(target))]
+        }
+        Action::SeekBackward => {
+            let target = app
+                .playback
+                .current_position_ms()
+                .saturating_sub(SEEK_STEP_MS);
+            vec![Effect::Player(PlayerCommand::Seek(target))]
+        }
+        Action::VolumeUp => {
+            let target = app.playback.volume.saturating_add(VOLUME_STEP);
+            vec![Effect::Player(PlayerCommand::SetVolume(target))]
+        }
+        Action::VolumeDown => {
+            let target = app.playback.volume.saturating_sub(VOLUME_STEP);
+            vec![Effect::Player(PlayerCommand::SetVolume(target))]
+        }
         Action::Refresh => vec![Effect::Api(ApiRequest::Playlists)],
         Action::Quit => vec![Effect::Quit],
     }
@@ -182,7 +275,11 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
-        Message::Player(_) => Vec::new(),
+        Message::Player(update) => {
+            app.playback.apply(update);
+            Vec::new()
+        }
+        Message::Tick => Vec::new(),
     }
 }
 
@@ -192,6 +289,14 @@ fn select_playlist(app: &mut App) -> Vec<Effect> {
     };
     app.focus = Focus::Main;
     request_tracks(app, id)
+}
+
+fn play_selected(app: &App) -> Vec<Effect> {
+    let Some(start_index) = app.track_list.selected() else {
+        return Vec::new();
+    };
+    let uris = app.tracks.iter().map(|track| track.uri.clone()).collect();
+    vec![Effect::Player(PlayerCommand::Load { uris, start_index })]
 }
 
 fn request_tracks(app: &mut App, id: String) -> Vec<Effect> {
@@ -221,6 +326,8 @@ fn move_selection(state: &mut ListState, len: usize, delta: isize) {
 }
 
 const LOAD_MORE_MARGIN: usize = 10;
+const SEEK_STEP_MS: u32 = 10_000;
+const VOLUME_STEP: u16 = 4096;
 
 fn load_more_if_near_end(app: &mut App) -> Vec<Effect> {
     if app.focus != Focus::Main || app.loading_more {
@@ -250,6 +357,7 @@ mod tests {
     use crate::spotify::api::{ApiError, TracksPage};
     use crate::spotify::auth::AuthError;
     use crate::spotify::model::{Playlist, TrackCount};
+    use crate::spotify::player::PlayerCommand;
 
     fn playlist(id: &str, name: &str) -> Playlist {
         Playlist {
@@ -283,6 +391,20 @@ mod tests {
             artists: Vec::new(),
             album: None,
         }
+    }
+
+    fn app_with_tracks(n: usize) -> App {
+        let mut app = app_with_playlists(1);
+        update(&mut app, Input::Action(Action::Select));
+        let tracks = (0..n).map(|i| track(&i.to_string())).collect();
+        update(
+            &mut app,
+            Input::Message(Message::Tracks {
+                playlist_id: "p0".into(),
+                result: Ok(page(tracks, None)),
+            }),
+        );
+        app
     }
 
     #[test]
@@ -444,5 +566,82 @@ mod tests {
         assert_eq!(app.focus, Focus::Main);
         update(&mut app, Input::Action(Action::FocusSidebar));
         assert_eq!(app.focus, Focus::Sidebar);
+    }
+
+    #[test]
+    fn select_track_loads_whole_list_from_that_index() {
+        let mut app = app_with_tracks(3);
+        update(&mut app, Input::Action(Action::MoveDown));
+        let effects = update(&mut app, Input::Action(Action::Select));
+        assert_eq!(
+            effects,
+            vec![Effect::Player(PlayerCommand::Load {
+                uris: vec![
+                    "spotify:track:0".into(),
+                    "spotify:track:1".into(),
+                    "spotify:track:2".into(),
+                ],
+                start_index: 1,
+            })]
+        );
+    }
+
+    #[test]
+    fn play_pause_is_forwarded() {
+        let mut app = App::new();
+        let effects = update(&mut app, Input::Action(Action::PlayPause));
+        assert_eq!(effects, vec![Effect::Player(PlayerCommand::PlayPause)]);
+    }
+
+    #[test]
+    fn seek_forward_uses_current_position() {
+        let mut app = App::new();
+        update(
+            &mut app,
+            Input::Message(Message::Player(PlayerUpdate::TrackChanged {
+                name: "t".into(),
+                artists: vec![],
+                album: "".into(),
+                duration_ms: 100_000,
+            })),
+        );
+        update(
+            &mut app,
+            Input::Message(Message::Player(PlayerUpdate::Paused {
+                position_ms: 30_000,
+            })),
+        );
+        let effects = update(&mut app, Input::Action(Action::SeekForward));
+        assert_eq!(effects, vec![Effect::Player(PlayerCommand::Seek(40_000))]);
+    }
+
+    #[test]
+    fn playing_update_starts_the_clock() {
+        let mut app = App::new();
+        update(
+            &mut app,
+            Input::Message(Message::Player(PlayerUpdate::Playing {
+                position_ms: 5_000,
+            })),
+        );
+        assert!(app.playback.position_at.is_some());
+        assert!(app.playback.current_position_ms() >= 5_000);
+    }
+
+    #[test]
+    fn paused_update_freezes_position() {
+        let mut app = App::new();
+        update(
+            &mut app,
+            Input::Message(Message::Player(PlayerUpdate::Paused { position_ms: 5_000 })),
+        );
+        assert_eq!(app.playback.position_at, None);
+        assert_eq!(app.playback.current_position_ms(), 5_000);
+    }
+
+    #[test]
+    fn tick_produces_no_effects() {
+        let mut app = App::new();
+        assert!(update(&mut app, Input::Message(Message::Tick)).is_empty());
     }
 }

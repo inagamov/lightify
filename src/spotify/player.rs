@@ -122,6 +122,7 @@ fn handle(spirc: &Spirc, command: PlayerCommand) -> Result<(), librespot::core::
                 playing_track: Some(PlayingTrack::Index(start_index as u32)),
                 ..Default::default()
             };
+            spirc.activate()?;
             spirc.load(LoadRequest::from_tracks(uris, options))
         }
         PlayerCommand::PlayPause => spirc.play_pause(),

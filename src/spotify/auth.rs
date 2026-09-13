@@ -31,9 +31,6 @@ pub enum AuthError {
     #[error("browser login failed: {0}")]
     OAuth(#[from] librespot_oauth::OAuthError),
 
-    #[error("could not connect to Spotify: {0}")]
-    Connect(#[source] librespot::core::Error),
-
     #[error("could not read or write the web api token file: {0}")]
     TokenStore(#[from] std::io::Error),
 

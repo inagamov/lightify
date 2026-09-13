@@ -5,6 +5,8 @@ mod message;
 mod spotify;
 mod ui;
 
+use std::time::Duration;
+
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind};
 use futures::StreamExt;
 use ratatui::DefaultTerminal;
@@ -61,6 +63,7 @@ async fn run(
     let mut events = EventStream::new();
 
     let mut pending = update(&mut app, Input::Action(Action::Refresh));
+    let mut tick = tokio::time::interval(Duration::from_millis(250));
 
     loop {
         for effect in pending.drain(..) {
@@ -70,6 +73,12 @@ async fn run(
                     return Ok(());
                 }
                 Effect::Api(request) => spawn_api(request, api.clone(), tx.clone()),
+                Effect::Player(command) => {
+                    if player.send(command).is_err() {
+                        tracing::error!("player task is gone");
+                        app.status = Some("player stopped".to_string());
+                    }
+                }
             }
         }
 
@@ -88,6 +97,7 @@ async fn run(
                 None => return Ok(()),
             },
             Some(message) = rx.recv() => Input::Message(message),
+            _ = tick.tick(), if app.playback.is_playing() => Input::Message(Message::Tick),
         };
 
         pending = update(&mut app, input);
@@ -104,6 +114,14 @@ fn key_to_action(key: KeyEvent) -> Option<Action> {
         KeyCode::Char('h') => Some(Action::FocusSidebar),
         KeyCode::Char('l') => Some(Action::FocusMain),
         KeyCode::Enter => Some(Action::Select),
+        KeyCode::Char(' ') => Some(Action::PlayPause),
+        KeyCode::Char('n') => Some(Action::Next),
+        KeyCode::Char('N') => Some(Action::Prev),
+        KeyCode::Char('>') => Some(Action::SeekForward),
+        KeyCode::Char('<') => Some(Action::SeekBackward),
+        // TODO: move to a group (because VolumeUp needs shift and VolumeDown does not)
+        KeyCode::Char('+') => Some(Action::VolumeUp),
+        KeyCode::Char('-') => Some(Action::VolumeDown),
         KeyCode::Char('R') => Some(Action::Refresh),
         KeyCode::Char('q') => Some(Action::Quit),
         _ => None,
