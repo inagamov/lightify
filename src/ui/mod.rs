@@ -3,10 +3,10 @@ use ratatui::layout::{Constraint, Layout};
 
 use crate::app::App;
 
-mod nowplaying;
-mod sidebar;
-mod status;
-mod tracks;
+pub mod nowplaying;
+pub mod sidebar;
+pub mod status;
+pub mod tracks;
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let [body, nowplaying_area, status_area] = Layout::vertical([

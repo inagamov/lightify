@@ -8,7 +8,7 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 
 use super::auth::{AuthError, WebToken, refresh_web_token, save_web_token};
-use super::model::{Page, Playlist, PlaylistItem, Track};
+use super::model::{Page, PlaylistItem, Track};
 
 const API: &str = "https://api.spotify.com/v1";
 
@@ -19,6 +19,9 @@ pub enum ApiError {
 
     #[error("request failed: {0}")]
     Http(#[from] reqwest::Error),
+
+    #[error("spotify session error: {0}")]
+    Session(#[from] librespot::core::Error),
 }
 
 #[derive(Clone)]
@@ -80,23 +83,6 @@ impl SpotifyApi {
         let token = self.access_token().await?;
         let response = self.http.get(url).bearer_auth(token).send().await?;
         Ok(response)
-    }
-
-    async fn fetch_all<T: DeserializeOwned>(&self, first_url: String) -> Result<Vec<T>, ApiError> {
-        let mut items = Vec::new();
-        let mut next = Some(first_url);
-
-        while let Some(url) = next {
-            let page: Page<T> = self.get(&url).await?;
-            items.extend(page.items);
-            next = page.next;
-        }
-
-        Ok(items)
-    }
-
-    pub async fn my_playlists(&self) -> Result<Vec<Playlist>, ApiError> {
-        self.fetch_all(format!("{API}/me/playlists?limit=50")).await
     }
 
     pub async fn playlist_tracks(&self, id: &str) -> Result<TracksPage, ApiError> {

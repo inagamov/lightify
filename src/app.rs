@@ -356,14 +356,14 @@ mod tests {
     use super::*;
     use crate::spotify::api::{ApiError, TracksPage};
     use crate::spotify::auth::AuthError;
-    use crate::spotify::model::{Playlist, TrackCount};
+    use crate::spotify::model::Playlist;
     use crate::spotify::player::PlayerCommand;
 
     fn playlist(id: &str, name: &str) -> Playlist {
         Playlist {
             id: id.to_string(),
             name: name.to_string(),
-            tracks: TrackCount { total: 0 },
+            track_count: 0,
         }
     }
 

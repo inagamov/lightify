@@ -2078,6 +2078,7 @@ dependencies = [
  "futures",
  "librespot",
  "librespot-oauth",
+ "protobuf",
  "ratatui",
  "reqwest 0.13.5",
  "serde",

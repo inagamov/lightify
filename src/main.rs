@@ -17,7 +17,7 @@ use app::{ApiRequest, App, Effect, Input, update};
 use message::Message;
 use spotify::api::SpotifyApi;
 
-use crate::spotify::player::PlayerCommand;
+use crate::spotify::{api::ApiError, library::Library, player::PlayerCommand};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -45,7 +45,8 @@ async fn main() -> anyhow::Result<()> {
         spotify::player::start(playback.session.clone(), playback.credentials, tx.clone()).await?;
 
     let mut terminal = ratatui::init();
-    let result = run(&mut terminal, api, player, tx, rx).await;
+    let library = Library::new(playback.session.clone());
+    let result = run(&mut terminal, api, library, player, tx, rx).await;
     ratatui::restore();
     playback.session.shutdown();
     result
@@ -54,6 +55,7 @@ async fn main() -> anyhow::Result<()> {
 async fn run(
     terminal: &mut DefaultTerminal,
     api: SpotifyApi,
+    library: Library,
     player: UnboundedSender<PlayerCommand>,
     tx: UnboundedSender<Message>,
     mut rx: UnboundedReceiver<Message>,
@@ -72,7 +74,9 @@ async fn run(
                     let _ = player.send(PlayerCommand::Shutdown);
                     return Ok(());
                 }
-                Effect::Api(request) => spawn_api(request, api.clone(), tx.clone()),
+                Effect::Api(request) => {
+                    spawn_api(request, api.clone(), library.clone(), tx.clone())
+                }
                 Effect::Player(command) => {
                     if player.send(command).is_err() {
                         tracing::error!("player task is gone");
@@ -128,12 +132,14 @@ fn key_to_action(key: KeyEvent) -> Option<Action> {
     }
 }
 
-fn spawn_api(request: ApiRequest, api: SpotifyApi, tx: UnboundedSender<Message>) {
+fn spawn_api(request: ApiRequest, api: SpotifyApi, library: Library, tx: UnboundedSender<Message>) {
     tracing::info!(?request, "api request");
 
     tokio::spawn(async move {
         let message = match request {
-            ApiRequest::Playlists => Message::Playlists(api.my_playlists().await),
+            ApiRequest::Playlists => {
+                Message::Playlists(library.my_playlists().await.map_err(ApiError::from))
+            }
             ApiRequest::PlaylistTracks { id } => {
                 let result = api.playlist_tracks(&id).await;
                 Message::Tracks {

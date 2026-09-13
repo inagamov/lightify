@@ -6,12 +6,11 @@ pub struct Page<T> {
     pub next: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Playlist {
     pub id: String,
     pub name: String,
-    #[serde(rename = "items")]
-    pub tracks: TrackCount,
+    pub track_count: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -67,18 +66,7 @@ impl Track {
 mod tests {
     use super::*;
 
-    const PLAYLISTS: &str = include_str!("../../tests/fixtures/playlists.json");
     const TRACKS: &str = include_str!("../../tests/fixtures/playlist_tracks.json");
-
-    #[test]
-    fn parses_playlist_page() {
-        let page: Page<Playlist> = serde_json::from_str(PLAYLISTS).unwrap();
-        assert_eq!(page.items.len(), 2);
-        assert_eq!(page.items[0].name, "Discover Weekly");
-        assert_eq!(page.items[0].tracks.total, 30);
-        assert_eq!(page.items[1].id, "1a2b3c");
-        assert!(page.next.is_some());
-    }
 
     #[test]
     fn parses_playlist_tracks_including_null_and_episode() {
