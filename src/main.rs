@@ -141,17 +141,14 @@ fn spawn_api(request: ApiRequest, api: SpotifyApi, library: Library, tx: Unbound
                 Message::Playlists(library.my_playlists().await.map_err(ApiError::from))
             }
             ApiRequest::PlaylistTracks { id } => {
-                let result = api.playlist_tracks(&id).await;
+                let result = library.first_page(&id).await.map_err(ApiError::from);
                 Message::Tracks {
                     playlist_id: id,
                     result,
                 }
             }
-            ApiRequest::MoreTracks {
-                playlist_id,
-                next_url,
-            } => {
-                let result = api.next_tracks(&next_url).await;
+            ApiRequest::MoreTracks { playlist_id, uris } => {
+                let result = library.track_details(uris).await.map_err(ApiError::from);
                 Message::MoreTracks {
                     playlist_id,
                     result,

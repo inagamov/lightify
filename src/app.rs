@@ -4,6 +4,7 @@ use ratatui::widgets::ListState;
 
 use crate::action::Action;
 use crate::message::Message;
+use crate::spotify::library::PAGE_SIZE;
 use crate::spotify::model::{Playlist, Track};
 use crate::spotify::player::{PlayerCommand, PlayerUpdate};
 
@@ -27,7 +28,7 @@ pub enum ApiRequest {
     },
     MoreTracks {
         playlist_id: String,
-        next_url: String,
+        uris: Vec<String>,
     },
 }
 
@@ -115,7 +116,7 @@ pub struct App {
     pub tracks: Vec<Track>,
     pub track_list: ListState,
     pub tracks_for: Option<String>,
-    pub tracks_next: Option<String>,
+    pub track_uris: Vec<String>,
     pub loading_more: bool,
     pub status: Option<String>,
     pub playback: Playback,
@@ -130,7 +131,7 @@ impl App {
             tracks: Vec::new(),
             track_list: ListState::default(),
             tracks_for: None,
-            tracks_next: None,
+            track_uris: Vec::new(),
             loading_more: false,
             status: None,
             playback: Playback::default(),
@@ -251,7 +252,7 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
             match result {
                 Ok(page) => {
                     app.tracks = page.tracks;
-                    app.tracks_next = page.next;
+                    app.track_uris = page.uris;
                     app.track_list.select(Some(0));
                 }
                 Err(error) => app.status = Some(error.to_string()),
@@ -267,10 +268,7 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
             }
             app.loading_more = false;
             match result {
-                Ok(page) => {
-                    app.tracks.extend(page.tracks);
-                    app.tracks_next = page.next;
-                }
+                Ok(tracks) => app.tracks.extend(tracks),
                 Err(error) => app.status = Some(error.to_string()),
             }
             Vec::new()
@@ -295,14 +293,14 @@ fn play_selected(app: &App) -> Vec<Effect> {
     let Some(start_index) = app.track_list.selected() else {
         return Vec::new();
     };
-    let uris = app.tracks.iter().map(|track| track.uri.clone()).collect();
+    let uris = app.track_uris.clone();
     vec![Effect::Player(PlayerCommand::Load { uris, start_index })]
 }
 
 fn request_tracks(app: &mut App, id: String) -> Vec<Effect> {
     app.tracks.clear();
     app.track_list.select(None);
-    app.tracks_next = None;
+    app.track_uris.clear();
     app.tracks_for = Some(id.clone());
     app.loading_more = false;
 
@@ -339,23 +337,28 @@ fn load_more_if_near_end(app: &mut App) -> Vec<Effect> {
     if selected + LOAD_MORE_MARGIN < app.tracks.len() {
         return Vec::new();
     }
-    let (Some(playlist_id), Some(next_url)) = (app.tracks_for.clone(), app.tracks_next.clone())
-    else {
+    let uris: Vec<String> = app.track_uris[app.tracks.len()..]
+        .iter()
+        .take(PAGE_SIZE)
+        .cloned()
+        .collect();
+    let Some(playlist_id) = app.tracks_for.clone() else {
         return Vec::new();
     };
+    if uris.is_empty() {
+        return Vec::new();
+    }
 
     app.loading_more = true;
-    vec![Effect::Api(ApiRequest::MoreTracks {
-        playlist_id,
-        next_url,
-    })]
+    vec![Effect::Api(ApiRequest::MoreTracks { playlist_id, uris })]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spotify::api::{ApiError, TracksPage};
+    use crate::spotify::api::ApiError;
     use crate::spotify::auth::AuthError;
+    use crate::spotify::library::TracksPage;
     use crate::spotify::model::Playlist;
     use crate::spotify::player::PlayerCommand;
 
@@ -376,11 +379,9 @@ mod tests {
         app
     }
 
-    fn page(tracks: Vec<Track>, next: Option<&str>) -> TracksPage {
-        TracksPage {
-            tracks,
-            next: next.map(str::to_string),
-        }
+    fn page(tracks: Vec<Track>, total: usize) -> TracksPage {
+        let uris = (0..total).map(|i| format!("spotify:track:t{i}")).collect();
+        TracksPage { uris, tracks }
     }
 
     fn track(name: &str) -> Track {
@@ -389,19 +390,19 @@ mod tests {
             name: name.to_string(),
             duration_ms: 0,
             artists: Vec::new(),
-            album: None,
+            album: String::new(),
         }
     }
 
     fn app_with_tracks(n: usize) -> App {
         let mut app = app_with_playlists(1);
         update(&mut app, Input::Action(Action::Select));
-        let tracks = (0..n).map(|i| track(&i.to_string())).collect();
+        let tracks = (0..n).map(|i| track(&format!("t{i}"))).collect();
         update(
             &mut app,
             Input::Message(Message::Tracks {
                 playlist_id: "p0".into(),
-                result: Ok(page(tracks, None)),
+                result: Ok(page(tracks, n)),
             }),
         );
         app
@@ -416,7 +417,7 @@ mod tests {
             &mut app,
             Input::Message(Message::Tracks {
                 playlist_id: "p0".into(),
-                result: Ok(page(tracks, Some("https://page2"))),
+                result: Ok(page(tracks, 51)),
             }),
         );
 
@@ -426,7 +427,7 @@ mod tests {
             update(&mut app, Input::Action(Action::GoBottom)),
             vec![Effect::Api(ApiRequest::MoreTracks {
                 playlist_id: "p0".into(),
-                next_url: "https://page2".into(),
+                uris: vec!["spotify:track:t50".into()],
             })]
         );
 
@@ -436,7 +437,7 @@ mod tests {
             &mut app,
             Input::Message(Message::MoreTracks {
                 playlist_id: "p0".into(),
-                result: Ok(page(vec![track("t50")], None)),
+                result: Ok(vec![track("t50")]),
             }),
         );
         assert_eq!(app.tracks.len(), 51);
@@ -519,17 +520,17 @@ mod tests {
     }
 
     #[test]
-    fn tracks_loaded_replace_the_list_and_keep_the_next_url() {
+    fn tracks_loaded_replace_the_list_and_keep_all_uris() {
         let mut app = app_with_playlists(1);
         update(&mut app, Input::Action(Action::Select));
         update(
             &mut app,
             Input::Message(Message::Tracks {
                 playlist_id: "p0".into(),
-                result: Ok(page(vec![], Some("https://next"))),
+                result: Ok(page(vec![], 3)),
             }),
         );
-        assert_eq!(app.tracks_next.as_deref(), Some("https://next"));
+        assert_eq!(app.track_uris.len(), 3);
         assert_eq!(app.track_list.selected(), Some(0));
     }
 
@@ -544,11 +545,11 @@ mod tests {
             &mut app,
             Input::Message(Message::Tracks {
                 playlist_id: "p0".into(),
-                result: Ok(page(vec![], Some("https://stale"))),
+                result: Ok(page(vec![], 3)),
             }),
         );
         assert_eq!(app.tracks_for.as_deref(), Some("p1"));
-        assert_eq!(app.tracks_next, None);
+        assert!(app.track_uris.is_empty());
     }
 
     #[test]
@@ -577,9 +578,9 @@ mod tests {
             effects,
             vec![Effect::Player(PlayerCommand::Load {
                 uris: vec![
-                    "spotify:track:0".into(),
-                    "spotify:track:1".into(),
-                    "spotify:track:2".into(),
+                    "spotify:track:t0".into(),
+                    "spotify:track:t1".into(),
+                    "spotify:track:t2".into(),
                 ],
                 start_index: 1,
             })]

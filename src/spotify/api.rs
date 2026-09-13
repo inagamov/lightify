@@ -8,7 +8,6 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 
 use super::auth::{AuthError, WebToken, refresh_web_token, save_web_token};
-use super::model::{Page, PlaylistItem, Track};
 
 const API: &str = "https://api.spotify.com/v1";
 
@@ -32,12 +31,7 @@ pub struct SpotifyApi {
     token: Arc<Mutex<WebToken>>,
 }
 
-#[derive(Debug)]
-pub struct TracksPage {
-    pub tracks: Vec<Track>,
-    pub next: Option<String>,
-}
-
+#[allow(dead_code)]
 impl SpotifyApi {
     pub fn new(client_id: String, cache_dir: PathBuf, token: WebToken) -> Self {
         Self {
@@ -83,27 +77,5 @@ impl SpotifyApi {
         let token = self.access_token().await?;
         let response = self.http.get(url).bearer_auth(token).send().await?;
         Ok(response)
-    }
-
-    pub async fn playlist_tracks(&self, id: &str) -> Result<TracksPage, ApiError> {
-        self.tracks_page(&format!("{API}/playlists/{id}/items?limit=50"))
-            .await
-    }
-
-    pub async fn next_tracks(&self, next_url: &str) -> Result<TracksPage, ApiError> {
-        self.tracks_page(next_url).await
-    }
-
-    async fn tracks_page(&self, url: &str) -> Result<TracksPage, ApiError> {
-        let page: Page<PlaylistItem> = self.get(url).await?;
-
-        Ok(TracksPage {
-            tracks: page
-                .items
-                .into_iter()
-                .filter_map(|item| item.track)
-                .collect(),
-            next: page.next,
-        })
     }
 }

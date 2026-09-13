@@ -17,14 +17,10 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
         None => String::from("Tracks"),
     };
 
-    let rows = app.tracks.iter().map(|track| {
-        format!(
-            "{} {} {}",
-            track.name,
-            track.artist_names(),
-            track.album_name()
-        )
-    });
+    let rows = app
+        .tracks
+        .iter()
+        .map(|track| format!("{} {} {}", track.name, track.artist_names(), track.album));
 
     let list = List::new(rows)
         .block(Block::bordered().title(title).border_style(border_style))
