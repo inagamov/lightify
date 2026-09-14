@@ -12,12 +12,11 @@ use futures::StreamExt;
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
+use crate::spotify::library::Library;
+use crate::spotify::player::PlayerCommand;
 use action::Action;
-use app::{ApiRequest, App, Effect, Input, update};
+use app::{App, Effect, Input, LibraryRequest, update};
 use message::Message;
-use spotify::api::SpotifyApi;
-
-use crate::spotify::{api::ApiError, library::Library, player::PlayerCommand};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -32,29 +31,23 @@ async fn main() -> anyhow::Result<()> {
         .init();
     tracing::info!("lightify starting");
 
-    let cfg = config::load()?;
-
-    let playback = spotify::auth::playback_login(&cache_dir).await?;
-    let web_token = spotify::auth::web_login(&cache_dir, &cfg.client_id).await?;
-
-    let api = SpotifyApi::new(cfg.client_id.clone(), cache_dir, web_token);
+    let login = spotify::auth::login(&cache_dir).await?;
 
     let (tx, rx) = mpsc::unbounded_channel::<Message>();
 
     let player =
-        spotify::player::start(playback.session.clone(), playback.credentials, tx.clone()).await?;
+        spotify::player::start(login.session.clone(), login.credentials, tx.clone()).await?;
 
     let mut terminal = ratatui::init();
-    let library = Library::new(playback.session.clone());
-    let result = run(&mut terminal, api, library, player, tx, rx).await;
+    let library = Library::new(login.session.clone());
+    let result = run(&mut terminal, library, player, tx, rx).await;
     ratatui::restore();
-    playback.session.shutdown();
+    login.session.shutdown();
     result
 }
 
 async fn run(
     terminal: &mut DefaultTerminal,
-    api: SpotifyApi,
     library: Library,
     player: UnboundedSender<PlayerCommand>,
     tx: UnboundedSender<Message>,
@@ -74,9 +67,7 @@ async fn run(
                     let _ = player.send(PlayerCommand::Shutdown);
                     return Ok(());
                 }
-                Effect::Api(request) => {
-                    spawn_api(request, api.clone(), library.clone(), tx.clone())
-                }
+                Effect::Api(request) => spawn_api(request, library.clone(), tx.clone()),
                 Effect::Player(command) => {
                     if player.send(command).is_err() {
                         tracing::error!("player task is gone");
@@ -132,23 +123,21 @@ fn key_to_action(key: KeyEvent) -> Option<Action> {
     }
 }
 
-fn spawn_api(request: ApiRequest, api: SpotifyApi, library: Library, tx: UnboundedSender<Message>) {
+fn spawn_api(request: LibraryRequest, library: Library, tx: UnboundedSender<Message>) {
     tracing::info!(?request, "api request");
 
     tokio::spawn(async move {
         let message = match request {
-            ApiRequest::Playlists => {
-                Message::Playlists(library.my_playlists().await.map_err(ApiError::from))
-            }
-            ApiRequest::PlaylistTracks { id } => {
-                let result = library.first_page(&id).await.map_err(ApiError::from);
+            LibraryRequest::Playlists => Message::Playlists(library.my_playlists().await),
+            LibraryRequest::PlaylistTracks { id } => {
+                let result = library.first_page(&id).await;
                 Message::Tracks {
                     playlist_id: id,
                     result,
                 }
             }
-            ApiRequest::MoreTracks { playlist_id, uris } => {
-                let result = library.track_details(uris).await.map_err(ApiError::from);
+            LibraryRequest::MoreTracks { playlist_id, uris } => {
+                let result = library.track_details(uris).await;
                 Message::MoreTracks {
                     playlist_id,
                     result,

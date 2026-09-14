@@ -1,18 +1,19 @@
-use crate::spotify::api::ApiError;
+use librespot::core::Error;
+
 use crate::spotify::library::TracksPage;
 use crate::spotify::model::{Playlist, Track};
 use crate::spotify::player::PlayerUpdate;
 
 #[derive(Debug)]
 pub enum Message {
-    Playlists(Result<Vec<Playlist>, ApiError>),
+    Playlists(Result<Vec<Playlist>, Error>),
     Tracks {
         playlist_id: String,
-        result: Result<TracksPage, ApiError>,
+        result: Result<TracksPage, Error>,
     },
     MoreTracks {
         playlist_id: String,
-        result: Result<Vec<Track>, ApiError>,
+        result: Result<Vec<Track>, Error>,
     },
     Player(PlayerUpdate),
     Tick,

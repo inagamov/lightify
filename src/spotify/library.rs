@@ -165,9 +165,11 @@ mod tests {
         msg.set_name("Dani California".into());
         msg.set_duration(282_160);
         let mut album = Album::new();
+        album.set_gid(vec![2; 16]);
         album.set_name("Stadium Arcadium".into());
         msg.album = Some(album).into();
         let mut artist = Artist::new();
+        artist.set_gid(vec![3; 16]);
         artist.set_name("Red Hot Chili Peppers".into());
         msg.artist.push(artist);
 

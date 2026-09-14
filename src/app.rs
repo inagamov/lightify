@@ -21,7 +21,7 @@ pub enum Input {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ApiRequest {
+pub enum LibraryRequest {
     Playlists,
     PlaylistTracks {
         id: String,
@@ -34,7 +34,7 @@ pub enum ApiRequest {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Effect {
-    Api(ApiRequest),
+    Api(LibraryRequest),
     Quit,
     Player(PlayerCommand),
 }
@@ -222,7 +222,7 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
             let target = app.playback.volume.saturating_sub(VOLUME_STEP);
             vec![Effect::Player(PlayerCommand::SetVolume(target))]
         }
-        Action::Refresh => vec![Effect::Api(ApiRequest::Playlists)],
+        Action::Refresh => vec![Effect::Api(LibraryRequest::Playlists)],
         Action::Quit => vec![Effect::Quit],
     }
 }
@@ -304,7 +304,7 @@ fn request_tracks(app: &mut App, id: String) -> Vec<Effect> {
     app.tracks_for = Some(id.clone());
     app.loading_more = false;
 
-    vec![Effect::Api(ApiRequest::PlaylistTracks { id })]
+    vec![Effect::Api(LibraryRequest::PlaylistTracks { id })]
 }
 
 fn focused_list(app: &mut App) -> (&mut ListState, usize) {
@@ -350,14 +350,15 @@ fn load_more_if_near_end(app: &mut App) -> Vec<Effect> {
     }
 
     app.loading_more = true;
-    vec![Effect::Api(ApiRequest::MoreTracks { playlist_id, uris })]
+    vec![Effect::Api(LibraryRequest::MoreTracks {
+        playlist_id,
+        uris,
+    })]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spotify::api::ApiError;
-    use crate::spotify::auth::AuthError;
     use crate::spotify::library::TracksPage;
     use crate::spotify::model::Playlist;
     use crate::spotify::player::PlayerCommand;
@@ -425,7 +426,7 @@ mod tests {
 
         assert_eq!(
             update(&mut app, Input::Action(Action::GoBottom)),
-            vec![Effect::Api(ApiRequest::MoreTracks {
+            vec![Effect::Api(LibraryRequest::MoreTracks {
                 playlist_id: "p0".into(),
                 uris: vec!["spotify:track:t50".into()],
             })]
@@ -448,7 +449,7 @@ mod tests {
     fn refresh_requests_playlists() {
         let mut app = App::new();
         let effects = update(&mut app, Input::Action(Action::Refresh));
-        assert_eq!(effects, vec![Effect::Api(ApiRequest::Playlists)]);
+        assert_eq!(effects, vec![Effect::Api(LibraryRequest::Playlists)]);
     }
 
     #[test]
@@ -469,7 +470,9 @@ mod tests {
         assert_eq!(app.sidebar.selected(), Some(0));
         assert_eq!(
             effects,
-            vec![Effect::Api(ApiRequest::PlaylistTracks { id: "p0".into() })]
+            vec![Effect::Api(LibraryRequest::PlaylistTracks {
+                id: "p0".into()
+            })]
         );
     }
 
@@ -513,7 +516,9 @@ mod tests {
         let effects = update(&mut app, Input::Action(Action::Select));
         assert_eq!(
             effects,
-            vec![Effect::Api(ApiRequest::PlaylistTracks { id: "p1".into() })]
+            vec![Effect::Api(LibraryRequest::PlaylistTracks {
+                id: "p1".into()
+            })]
         );
         assert_eq!(app.focus, Focus::Main);
         assert_eq!(app.tracks_for.as_deref(), Some("p1"));
@@ -553,9 +558,9 @@ mod tests {
     }
 
     #[test]
-    fn api_error_goes_to_status_line() {
+    fn library_error_goes_to_status_line() {
         let mut app = App::new();
-        let err = ApiError::Auth(AuthError::TokenStore(std::io::Error::other("boom")));
+        let err = librespot::core::Error::unavailable("boom");
         update(&mut app, Input::Message(Message::Playlists(Err(err))));
         assert!(app.status.as_deref().unwrap_or("").contains("boom"));
     }
