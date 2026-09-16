@@ -1,10 +1,12 @@
 use std::path::Path;
 
+use librespot::core::SessionConfig;
 use librespot::core::authentication::Credentials;
 use librespot::core::cache::Cache;
-use librespot::core::{Session, SessionConfig};
 use librespot_oauth::{OAuthClientBuilder, OAuthToken};
 use thiserror::Error;
+
+use crate::spotify::session::SessionHandle;
 
 const REDIRECT_URI: &str = "http://127.0.0.1:8898/login";
 const SCOPES: &[&str] = &["streaming"];
@@ -19,7 +21,7 @@ pub enum AuthError {
 }
 
 pub struct Login {
-    pub session: Session,
+    pub session: SessionHandle,
     pub credentials: Credentials,
 }
 
@@ -36,7 +38,8 @@ pub async fn login(cache_dir: &Path) -> Result<Login, AuthError> {
         }
     };
 
-    let session = Session::new(config, Some(cache));
+    let session = SessionHandle::new(config, cache);
+
     Ok(Login {
         session,
         credentials,

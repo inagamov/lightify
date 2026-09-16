@@ -1,12 +1,13 @@
 use futures::{StreamExt, TryStreamExt, stream};
 use librespot::{
-    core::{Session, SpotifyId, SpotifyUri},
+    core::{SpotifyId, SpotifyUri},
     metadata::{self, Metadata},
     protocol::playlist4_external::{Item, MetaItem, SelectedListContent},
 };
 use protobuf::Message;
 
 use crate::spotify::model::{Playlist, Track};
+use crate::spotify::session::SessionHandle;
 
 const ROOTLIST_PAGE: usize = 120;
 pub const PAGE_SIZE: usize = 50;
@@ -14,7 +15,7 @@ const CONCURRENCY: usize = 8;
 
 #[derive(Clone)]
 pub struct Library {
-    session: Session,
+    session: SessionHandle,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -24,16 +25,16 @@ pub struct TracksPage {
 }
 
 impl Library {
-    pub fn new(session: Session) -> Self {
+    pub fn new(session: SessionHandle) -> Self {
         Self { session }
     }
 
     pub async fn my_playlists(&self) -> Result<Vec<Playlist>, librespot::core::Error> {
+        let session = self.session.get();
         let mut playlists = Vec::new();
         let mut from = 0;
         loop {
-            let bytes = self
-                .session
+            let bytes = session
                 .spclient()
                 .get_rootlist(from, Some(ROOTLIST_PAGE))
                 .await?;
@@ -50,11 +51,12 @@ impl Library {
     }
 
     pub async fn playlist_tracks(&self, id: &str) -> Result<Vec<String>, librespot::core::Error> {
+        let session = self.session.get();
         let uri = SpotifyUri::Playlist {
             user: None,
             id: SpotifyId::from_base62(id)?,
         };
-        let playlist = metadata::Playlist::get(&self.session, &uri).await?;
+        let playlist = metadata::Playlist::get(&session, &uri).await?;
         playlist
             .tracks()
             .filter(|uri| matches!(uri, SpotifyUri::Track { .. }))
@@ -66,11 +68,15 @@ impl Library {
         &self,
         uris: Vec<String>,
     ) -> Result<Vec<Track>, librespot::core::Error> {
+        let session = self.session.get();
         stream::iter(uris)
-            .map(|uri| async move {
-                let track =
-                    metadata::Track::get(&self.session, &SpotifyUri::from_uri(&uri)?).await?;
-                Ok::<Track, librespot::core::Error>(to_track(&uri, track))
+            .map(|uri| {
+                let session = session.clone();
+                async move {
+                    let track =
+                        metadata::Track::get(&session, &SpotifyUri::from_uri(&uri)?).await?;
+                    Ok::<Track, librespot::core::Error>(to_track(&uri, track))
+                }
             })
             .buffered(CONCURRENCY)
             .try_collect()
