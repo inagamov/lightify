@@ -61,6 +61,7 @@ pub struct NowPlaying {
     pub artists: Vec<String>,
     pub album: String,
     pub duration_ms: u32,
+    pub uri: String,
 }
 
 impl Playback {
@@ -81,12 +82,14 @@ impl Playback {
                 artists,
                 album,
                 duration_ms,
+                uri,
             } => {
                 self.track = Some(NowPlaying {
                     name,
                     artists,
                     album,
                     duration_ms,
+                    uri,
                 });
             }
             PlayerUpdate::Playing { position_ms } => {
@@ -173,6 +176,10 @@ impl App {
 
     pub fn status_text(&self) -> Option<&str> {
         self.status.as_ref().map(Status::text)
+    }
+
+    pub fn playing_uri(&self) -> Option<&str> {
+        self.playback.track.as_ref().map(|t| t.uri.as_str())
     }
 }
 
@@ -483,6 +490,7 @@ mod tests {
                 artists: vec![],
                 album: "".into(),
                 duration_ms: 1,
+                uri: "spotify:track:t".into(),
             }),
         );
         update(&mut app, player(PlayerUpdate::Playing { position_ms: 0 }));
@@ -932,6 +940,7 @@ mod tests {
                 artists: vec![],
                 album: "".into(),
                 duration_ms: 100_000,
+                uri: "spotify:track:t".into(),
             })),
         );
         update(
@@ -988,5 +997,22 @@ mod tests {
         app.connection = ConnectionStatus::Lost;
         update(&mut app, Input::Action(Action::Refresh));
         assert_eq!(app.status, Some(Status::Info("reconnecting".to_string())));
+    }
+
+    #[test]
+    fn playing_uri_follows_track_changed() {
+        let mut app = App::new();
+        assert_eq!(app.playing_uri(), None);
+        update(
+            &mut app,
+            Input::Message(Message::Player(PlayerUpdate::TrackChanged {
+                uri: "spotify:track:abc".to_string(),
+                name: "Song".to_string(),
+                artists: vec![],
+                album: String::new(),
+                duration_ms: 1000,
+            })),
+        );
+        assert_eq!(app.playing_uri(), Some("spotify:track:abc"));
     }
 }

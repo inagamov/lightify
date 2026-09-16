@@ -62,6 +62,7 @@ pub enum PlayerUpdate {
         artists: Vec<String>,
         album: String,
         duration_ms: u32,
+        uri: String,
     },
     Playing {
         position_ms: u32,
@@ -288,7 +289,6 @@ impl PlayerTask {
         match event {
             ConnectionEvent::ConnectionDead { task_finished } => {
                 tracing::warn!("connection to spotify dropped");
-                // Spirc's own disconnect handling leaves the player running.
                 self.player.stop();
                 let _ = self.tx.send(Message::Player(PlayerUpdate::Disconnected));
                 let old = std::mem::replace(&mut self.connection, Connection::Down);
@@ -460,7 +460,6 @@ fn handle(spirc: &Spirc, command: PlayerCommand) -> Result<(), librespot::core::
         PlayerCommand::Prev => spirc.prev(),
         PlayerCommand::Seek(position_ms) => spirc.set_position_ms(position_ms),
         PlayerCommand::SetVolume(volume) => spirc.set_volume(volume),
-        // The command loop handles this one before calling here.
         PlayerCommand::Reconnect => Ok(()),
     }
 }
@@ -492,6 +491,7 @@ fn translate(event: PlayerEvent) -> Option<PlayerUpdate> {
                 artists,
                 album,
                 duration_ms: item.duration_ms,
+                uri: item.uri,
             })
         }
         _ => None,
