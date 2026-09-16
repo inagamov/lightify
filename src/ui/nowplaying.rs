@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::Style,
+    text::{Line, Span},
     widgets::{Gauge, Paragraph},
 };
 
@@ -22,7 +22,11 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let icon = if playback.is_playing() { "▶" } else { "⏸" };
-    let title = format!("{icon} {}  {}", track.name, track.artists.join(", "));
+
+    let title = Line::from(vec![
+        Span::raw(format!("{icon} {}  ", track.name)),
+        Span::styled(track.artists.join(", "), app.theme.dim()),
+    ]);
     frame.render_widget(Paragraph::new(title), title_area);
 
     let position = playback.current_position_ms().min(track.duration_ms);
@@ -36,7 +40,8 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let gauge = Gauge::default()
         .ratio(ratio)
         .label(label)
-        .gauge_style(Style::new().green());
+        .style(app.theme.dim())
+        .gauge_style(app.theme.accent);
     frame.render_widget(gauge, gauge_area);
 
     let percent = u32::from(playback.volume) * 100 / u32::from(u16::MAX);

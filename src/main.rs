@@ -14,6 +14,7 @@ use ratatui::DefaultTerminal;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::time::MissedTickBehavior;
 
+use crate::app::Status;
 use crate::spotify::library::Library;
 use crate::spotify::player::PlayerCommand;
 use crate::theme::Theme;
@@ -121,7 +122,7 @@ fn send_player_command(
     if player.send(command).is_err() {
         tracing::error!("player task is gone");
         app.connection = app::ConnectionStatus::Lost;
-        app.status = Some("player stopped".to_string());
+        app.status = Some(Status::Error("player stopped".to_string()));
     }
 }
 
@@ -205,7 +206,7 @@ mod tests {
             send_player_command(&mut app, &player, PlayerCommand::Reconnect);
 
             assert_eq!(app.connection, ConnectionStatus::Lost);
-            assert_eq!(app.status.as_deref(), Some("player stopped"));
+            assert_eq!(app.status_text(), Some("player stopped"));
         }
     }
 }
