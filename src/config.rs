@@ -15,10 +15,6 @@ fn app_dir(xdg_var: &str, unix_dot_dir: &str, windows_dir: fn() -> Option<PathBu
     base.join("lightify")
 }
 
-pub fn config_dir() -> PathBuf {
-    app_dir("XDG_CONFIG_HOME", ".config", dirs::config_dir)
-}
-
 pub fn cache_dir() -> PathBuf {
     app_dir("XDG_CACHE_HOME", ".cache", dirs::cache_dir)
 }
@@ -29,16 +25,12 @@ mod tests {
 
     #[test]
     fn dirs_end_with_app_name() {
-        assert!(config_dir().ends_with("lightify"));
         assert!(cache_dir().ends_with("lightify"));
     }
 
     #[cfg(not(windows))]
     #[test]
     fn unix_dirs_live_under_dot_directories() {
-        if std::env::var_os("XDG_CONFIG_HOME").is_none() {
-            assert!(config_dir().to_string_lossy().contains("/.config/"));
-        }
         if std::env::var_os("XDG_CACHE_HOME").is_none() {
             assert!(cache_dir().to_string_lossy().contains("/.cache/"));
         }

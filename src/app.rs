@@ -154,10 +154,6 @@ impl App {
         self.sidebar.selected().and_then(|i| self.playlists.get(i))
     }
 
-    pub fn selected_track(&self) -> Option<&Track> {
-        self.track_list.selected().and_then(|i| self.tracks.get(i))
-    }
-
     pub fn is_showing(&self, playlist_id: &str) -> bool {
         self.tracks_for.as_deref() == Some(playlist_id)
     }
@@ -339,7 +335,7 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
 }
 
 fn report_error(app: &mut App, error: &librespot::core::Error) {
-    if app.connection == ConnectionStatus::Connected {
+    if library_available(app) {
         app.status = Some(error.to_string());
     } else {
         tracing::warn!("library error while not connected: {error}");

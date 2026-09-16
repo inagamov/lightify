@@ -1,5 +1,4 @@
 use std::future::Future;
-use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -15,7 +14,7 @@ use librespot::playback::{audio_backend, mixer};
 use thiserror::Error;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
-use tokio::time::{Sleep, Timeout, sleep, timeout};
+use tokio::time::{self, sleep_until, timeout, timeout_at};
 
 use crate::message::Message;
 use crate::spotify::reconnect::Reconnector;
@@ -33,7 +32,6 @@ pub enum PlayerCommand {
     Seek(u32),
     SetVolume(u16),
     Reconnect,
-    Shutdown,
 }
 
 #[derive(Debug, Error)]
@@ -87,15 +85,16 @@ pub struct PlayerHandle {
 }
 
 impl PlayerHandle {
-    pub async fn shutdown(mut self) {
-        let _ = self.commands.send(PlayerCommand::Shutdown);
-        match timeout(Duration::from_secs(10), &mut self.task).await {
+    pub async fn shutdown(self) {
+        let PlayerHandle { commands, mut task } = self;
+        drop(commands);
+        match timeout(Duration::from_secs(10), &mut task).await {
             Ok(Ok(())) => {}
             Ok(Err(error)) => tracing::error!("player task failed: {error}"),
             Err(_) => {
                 tracing::warn!("player task did not stop in time");
-                self.task.abort();
-                let _ = self.task.await;
+                task.abort();
+                let _ = task.await;
             }
         }
     }
@@ -108,7 +107,6 @@ const SESSION_CHECK: Duration = Duration::from_secs(1);
 
 type SpircTask = Pin<Box<dyn Future<Output = ()> + Send>>;
 type Attempt = Pin<Box<dyn Future<Output = Result<Connected, PlayerError>> + Send>>;
-type Cleanup = Pin<Box<Timeout<SpircTask>>>;
 
 struct Connected {
     spirc: Spirc,
@@ -118,9 +116,17 @@ struct Connected {
 
 enum Connection {
     Up(Connected),
-    Draining { cleanup: Cleanup },
-    Waiting { until: Pin<Box<Sleep>> },
-    Connecting { attempt: Attempt, manual: bool },
+    Draining {
+        task: SpircTask,
+        deadline: time::Instant,
+    },
+    Waiting {
+        until: time::Instant,
+    },
+    Connecting {
+        attempt: Attempt,
+        manual: bool,
+    },
     Down,
 }
 
@@ -156,12 +162,12 @@ impl Connection {
                     }
                 }
             }
-            Connection::Draining { cleanup } => {
-                let in_time = cleanup.as_mut().await.is_ok();
+            Connection::Draining { task, deadline } => {
+                let in_time = timeout_at(*deadline, task.as_mut()).await.is_ok();
                 ConnectionEvent::Drained { in_time }
             }
             Connection::Waiting { until } => {
-                until.as_mut().await;
+                sleep_until(*until).await;
                 ConnectionEvent::RetryDue
             }
             Connection::Connecting { attempt, manual } => ConnectionEvent::AttemptFinished {
@@ -182,12 +188,12 @@ impl Connection {
                     tracing::warn!("spirc did not shut down in time");
                 }
             }
-            Connection::Draining { cleanup } => match timeout(QUIT_TIMEOUT, cleanup).await {
-                Ok(Ok(())) => {}
-                Ok(Err(_)) | Err(_) => {
+            Connection::Draining { task, deadline } => {
+                let deadline = deadline.min(time::Instant::now() + QUIT_TIMEOUT);
+                if timeout_at(deadline, task).await.is_err() {
                     tracing::warn!("spirc cleanup did not finish in time");
                 }
-            },
+            }
             Connection::Connecting { .. } | Connection::Waiting { .. } | Connection::Down => {}
         }
     }
@@ -212,11 +218,7 @@ impl PlayerTask {
         loop {
             tokio::select! {
                 command = commands.recv() => match command {
-                    Some(command) => {
-                        if self.handle_command(command).is_break() {
-                            break;
-                        }
-                    }
+                    Some(command) => self.handle_command(command),
                     None => break,
                 },
                 Some(event) = events.recv() => {
@@ -230,37 +232,34 @@ impl PlayerTask {
         self.shutdown().await;
     }
 
-    fn handle_command(&mut self, command: PlayerCommand) -> ControlFlow<()> {
+    fn handle_command(&mut self, command: PlayerCommand) {
         match command {
-            PlayerCommand::Shutdown => ControlFlow::Break(()),
-            PlayerCommand::Reconnect => {
-                match self.connection {
-                    Connection::Waiting { .. } | Connection::Down => {
-                        tracing::info!("manual reconnect");
-                        self.connection = Connection::Connecting {
-                            attempt: self.attempt(),
-                            manual: true,
-                        };
-                    }
-                    Connection::Up(_)
-                    | Connection::Draining { .. }
-                    | Connection::Connecting { .. } => {
-                        tracing::info!("reconnect requested while busy; ignored");
+            PlayerCommand::Reconnect => match self.connection {
+                Connection::Waiting { .. } | Connection::Down => {
+                    tracing::info!("manual reconnect");
+                    self.connection = Connection::Connecting {
+                        attempt: self.attempt(),
+                        manual: true,
+                    };
+                }
+                Connection::Up(_) | Connection::Draining { .. } | Connection::Connecting { .. } => {
+                    tracing::info!("reconnect requested while busy; ignored");
+                }
+            },
+            command => match &self.connection {
+                Connection::Up(Connected { spirc, .. }) => {
+                    if let Err(error) = handle(spirc, command) {
+                        tracing::error!("player command failed: {error}");
                     }
                 }
-                ControlFlow::Continue(())
-            }
-            command => {
-                match &self.connection {
-                    Connection::Up(Connected { spirc, .. }) => {
-                        if let Err(error) = handle(spirc, command) {
-                            tracing::error!("player command failed: {error}");
-                        }
+                _ => match &command {
+                    // A whole playlist of URIs does not belong in the log.
+                    PlayerCommand::Load { uris, .. } => {
+                        tracing::warn!(tracks = uris.len(), "dropped load: not connected");
                     }
-                    _ => tracing::warn!(?command, "dropped: not connected"),
-                }
-                ControlFlow::Continue(())
-            }
+                    other => tracing::warn!(?other, "dropped: not connected"),
+                },
+            },
         }
     }
 
@@ -289,13 +288,16 @@ impl PlayerTask {
         match event {
             ConnectionEvent::ConnectionDead { task_finished } => {
                 tracing::warn!("connection to spotify dropped");
+                // Spirc's own disconnect handling leaves the player running.
+                self.player.stop();
                 let _ = self.tx.send(Message::Player(PlayerUpdate::Disconnected));
                 let old = std::mem::replace(&mut self.connection, Connection::Down);
                 self.connection = match old {
                     Connection::Up(Connected { task, .. }) if !task_finished => {
                         tracing::info!("waiting for spirc cleanup");
                         Connection::Draining {
-                            cleanup: Box::pin(timeout(SHUTDOWN_TIMEOUT, task)),
+                            task,
+                            deadline: time::Instant::now() + SHUTDOWN_TIMEOUT,
                         }
                     }
                     _ => self.schedule_retry(),
@@ -344,7 +346,7 @@ impl PlayerTask {
             Some(delay) => {
                 tracing::info!(?delay, "next reconnect attempt");
                 Connection::Waiting {
-                    until: Box::pin(sleep(delay)),
+                    until: time::Instant::now() + delay,
                 }
             }
             None => self.give_up(None),
@@ -458,7 +460,8 @@ fn handle(spirc: &Spirc, command: PlayerCommand) -> Result<(), librespot::core::
         PlayerCommand::Prev => spirc.prev(),
         PlayerCommand::Seek(position_ms) => spirc.set_position_ms(position_ms),
         PlayerCommand::SetVolume(volume) => spirc.set_volume(volume),
-        PlayerCommand::Reconnect | PlayerCommand::Shutdown => Ok(()),
+        // The command loop handles this one before calling here.
+        PlayerCommand::Reconnect => Ok(()),
     }
 }
 
@@ -518,8 +521,10 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn quit_while_draining_is_bounded_by_quit_timeout() {
-        let cleanup = Box::pin(timeout(SHUTDOWN_TIMEOUT, stuck_spirc()));
-        let connection = Connection::Draining { cleanup };
+        let connection = Connection::Draining {
+            task: stuck_spirc(),
+            deadline: time::Instant::now() + SHUTDOWN_TIMEOUT,
+        };
 
         let started = tokio::time::Instant::now();
         connection.quit().await;
@@ -529,8 +534,10 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn quit_while_draining_returns_as_soon_as_cleanup_finishes() {
-        let cleanup = Box::pin(timeout(SHUTDOWN_TIMEOUT, Box::pin(async {}) as SpircTask));
-        let connection = Connection::Draining { cleanup };
+        let connection = Connection::Draining {
+            task: Box::pin(async {}),
+            deadline: time::Instant::now() + SHUTDOWN_TIMEOUT,
+        };
 
         let started = tokio::time::Instant::now();
         connection.quit().await;
@@ -541,7 +548,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn quit_while_waiting_does_not_wait_out_the_retry() {
         let connection = Connection::Waiting {
-            until: Box::pin(sleep(Duration::from_secs(60))),
+            until: time::Instant::now() + Duration::from_secs(60),
         };
 
         let started = tokio::time::Instant::now();

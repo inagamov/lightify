@@ -27,9 +27,7 @@ impl SessionHandle {
 
     pub fn reconnect(&self) -> Session {
         let mut current = self.session.write().expect("session lock poisoned");
-        if !current.is_invalid() {
-            current.shutdown();
-        }
+        current.shutdown();
         *current = Session::new(self.config.clone(), Some(self.cache.clone()));
         current.clone()
     }
@@ -39,9 +37,9 @@ impl SessionHandle {
     }
 
     pub fn shutdown(&self) {
-        let session = self.session.read().expect("session lock poisoned");
-        if !session.is_invalid() {
-            session.shutdown();
-        }
+        self.session
+            .read()
+            .expect("session lock poisoned")
+            .shutdown();
     }
 }

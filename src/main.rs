@@ -136,31 +136,6 @@ fn key_to_action(key: KeyEvent) -> Option<Action> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use app::ConnectionStatus;
-
-    #[test]
-    fn failed_reconnect_send_leaves_refresh_retryable() {
-        let (player, receiver) = mpsc::unbounded_channel();
-        drop(receiver);
-        let mut app = App::new();
-        app.connection = ConnectionStatus::Lost;
-
-        for _ in 0..2 {
-            let effects = update(&mut app, Input::Action(Action::Refresh));
-            assert_eq!(effects, vec![Effect::Player(PlayerCommand::Reconnect)]);
-            assert_eq!(app.connection, ConnectionStatus::Reconnecting);
-
-            send_player_command(&mut app, &player, PlayerCommand::Reconnect);
-
-            assert_eq!(app.connection, ConnectionStatus::Lost);
-            assert_eq!(app.status.as_deref(), Some("player stopped"));
-        }
-    }
-}
-
 fn spawn_api(
     request: LibraryRequest,
     generation: u64,
@@ -195,4 +170,29 @@ fn spawn_api(
 
         let _ = tx.send(message);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use app::ConnectionStatus;
+
+    #[test]
+    fn failed_reconnect_send_leaves_refresh_retryable() {
+        let (player, receiver) = mpsc::unbounded_channel();
+        drop(receiver);
+        let mut app = App::new();
+        app.connection = ConnectionStatus::Lost;
+
+        for _ in 0..2 {
+            let effects = update(&mut app, Input::Action(Action::Refresh));
+            assert_eq!(effects, vec![Effect::Player(PlayerCommand::Reconnect)]);
+            assert_eq!(app.connection, ConnectionStatus::Reconnecting);
+
+            send_player_command(&mut app, &player, PlayerCommand::Reconnect);
+
+            assert_eq!(app.connection, ConnectionStatus::Lost);
+            assert_eq!(app.status.as_deref(), Some("player stopped"));
+        }
+    }
 }
