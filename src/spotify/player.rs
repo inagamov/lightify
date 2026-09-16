@@ -254,7 +254,6 @@ impl PlayerTask {
                     }
                 }
                 _ => match &command {
-                    // A whole playlist of URIs does not belong in the log.
                     PlayerCommand::Load { uris, .. } => {
                         tracing::warn!(tracks = uris.len(), "dropped load: not connected");
                     }

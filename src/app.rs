@@ -174,6 +174,7 @@ impl App {
         self
     }
 
+    #[cfg(test)]
     pub fn status_text(&self) -> Option<&str> {
         self.status.as_ref().map(Status::text)
     }
