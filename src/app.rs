@@ -7,6 +7,7 @@ use crate::message::Message;
 use crate::spotify::library::PAGE_SIZE;
 use crate::spotify::model::{Playlist, Track};
 use crate::spotify::player::{PlayerCommand, PlayerUpdate};
+use crate::theme::Theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -130,6 +131,7 @@ pub struct App {
     pub loading_more: bool,
     pub status: Option<String>,
     pub playback: Playback,
+    pub theme: Theme,
 }
 
 impl App {
@@ -147,6 +149,7 @@ impl App {
             loading_more: false,
             status: None,
             playback: Playback::default(),
+            theme: Theme::default(),
         }
     }
 
@@ -161,6 +164,11 @@ impl App {
     pub fn showing_playlist(&self) -> Option<&Playlist> {
         let id = self.tracks_for.as_deref()?;
         self.playlists.iter().find(|p| p.id == id)
+    }
+
+    pub fn with_theme(mut self, theme: Theme) -> Self {
+        self.theme = theme;
+        self
     }
 }
 
