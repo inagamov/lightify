@@ -3,6 +3,7 @@ mod app;
 mod config;
 mod message;
 mod spotify;
+mod theme;
 mod ui;
 
 use std::time::Duration;
