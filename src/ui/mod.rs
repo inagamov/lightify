@@ -1,5 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
+use ratatui::widgets::Block;
 
 use crate::app::App;
 
@@ -15,6 +16,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Constraint::Length(1),
     ])
     .areas(frame.area());
+
+    frame.render_widget(Block::new().style(app.theme.base()), frame.area());
 
     let [sidebar_area, tracks_area] =
         Layout::horizontal([Constraint::Length(24), Constraint::Min(20)]).areas(body);

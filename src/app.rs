@@ -7,6 +7,7 @@ use crate::message::Message;
 use crate::spotify::library::PAGE_SIZE;
 use crate::spotify::model::{Playlist, Track};
 use crate::spotify::player::{PlayerCommand, PlayerUpdate};
+use crate::theme::Theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -60,6 +61,7 @@ pub struct NowPlaying {
     pub artists: Vec<String>,
     pub album: String,
     pub duration_ms: u32,
+    pub uri: String,
 }
 
 impl Playback {
@@ -80,12 +82,14 @@ impl Playback {
                 artists,
                 album,
                 duration_ms,
+                uri,
             } => {
                 self.track = Some(NowPlaying {
                     name,
                     artists,
                     album,
                     duration_ms,
+                    uri,
                 });
             }
             PlayerUpdate::Playing { position_ms } => {
@@ -128,8 +132,9 @@ pub struct App {
     pub tracks_for: Option<String>,
     pub track_uris: Vec<String>,
     pub loading_more: bool,
-    pub status: Option<String>,
+    pub status: Option<Status>,
     pub playback: Playback,
+    pub theme: Theme,
 }
 
 impl App {
@@ -147,6 +152,7 @@ impl App {
             loading_more: false,
             status: None,
             playback: Playback::default(),
+            theme: Theme::default(),
         }
     }
 
@@ -161,6 +167,20 @@ impl App {
     pub fn showing_playlist(&self) -> Option<&Playlist> {
         let id = self.tracks_for.as_deref()?;
         self.playlists.iter().find(|p| p.id == id)
+    }
+
+    pub fn with_theme(mut self, theme: Theme) -> Self {
+        self.theme = theme;
+        self
+    }
+
+    #[cfg(test)]
+    pub fn status_text(&self) -> Option<&str> {
+        self.status.as_ref().map(Status::text)
+    }
+
+    pub fn playing_uri(&self) -> Option<&str> {
+        self.playback.track.as_ref().map(|t| t.uri.as_str())
     }
 }
 
@@ -235,7 +255,7 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
             ConnectionStatus::Reconnecting => Vec::new(),
             ConnectionStatus::Lost => {
                 app.connection = ConnectionStatus::Reconnecting;
-                app.status = Some("reconnecting".to_string());
+                app.status = Some(Status::Info("reconnecting".to_string()));
                 vec![Effect::Player(PlayerCommand::Reconnect)]
             }
         },
@@ -312,18 +332,22 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
                     app.library_generation += 1;
                     app.loading_more = false;
                     app.connection = ConnectionStatus::Reconnecting;
-                    app.status = Some("connection dropped, reconnecting".to_string());
+                    app.status = Some(Status::Error(
+                        "connection dropped, reconnecting".to_string(),
+                    ));
                 }
                 PlayerUpdate::Reconnected => {
                     app.connection = ConnectionStatus::Connected;
-                    app.status = Some("reconnected, press enter on a track to play".to_string());
+                    app.status = Some(Status::Error(
+                        "reconnected, press enter on a track to play".to_string(),
+                    ));
                 }
                 PlayerUpdate::ConnectionLost(ref error) => {
                     app.connection = ConnectionStatus::Lost;
                     app.status =
-                        Some(error.clone().unwrap_or_else(|| {
+                        Some(Status::Error(error.clone().unwrap_or_else(|| {
                             "connection lost, press R to reconnect".to_string()
-                        }));
+                        })));
                 }
                 _ => {}
             }
@@ -336,7 +360,7 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
 
 fn report_error(app: &mut App, error: &librespot::core::Error) {
     if library_available(app) {
-        app.status = Some(error.to_string());
+        app.status = Some(Status::Error(error.to_string()));
     } else {
         tracing::warn!("library error while not connected: {error}");
     }
@@ -424,6 +448,20 @@ fn load_more_if_near_end(app: &mut App) -> Vec<Effect> {
     })]
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Status {
+    Info(String),
+    Error(String),
+}
+
+impl Status {
+    pub fn text(&self) -> &str {
+        match self {
+            Self::Info(text) | Self::Error(text) => text,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -453,6 +491,7 @@ mod tests {
                 artists: vec![],
                 album: "".into(),
                 duration_ms: 1,
+                uri: "spotify:track:t".into(),
             }),
         );
         update(&mut app, player(PlayerUpdate::Playing { position_ms: 0 }));
@@ -460,10 +499,7 @@ mod tests {
         assert_eq!(app.connection, ConnectionStatus::Reconnecting);
         assert_eq!(app.playback.track, None);
         assert!(!app.playback.is_playing());
-        assert_eq!(
-            app.status.as_deref(),
-            Some("connection dropped, reconnecting")
-        );
+        assert_eq!(app.status_text(), Some("connection dropped, reconnecting"));
     }
 
     #[test]
@@ -475,7 +511,7 @@ mod tests {
         assert!(!app.playback.is_playing());
         assert_eq!(app.playback.track, None);
         assert_eq!(
-            app.status.as_deref(),
+            app.status_text(),
             Some("reconnected, press enter on a track to play")
         );
     }
@@ -486,7 +522,7 @@ mod tests {
         update(&mut app, player(PlayerUpdate::ConnectionLost(None)));
         assert_eq!(app.connection, ConnectionStatus::Lost);
         assert_eq!(
-            app.status.as_deref(),
+            app.status_text(),
             Some("connection lost, press R to reconnect")
         );
     }
@@ -498,7 +534,7 @@ mod tests {
         update(&mut app, player(PlayerUpdate::ConnectionLost(Some(error))));
         assert_eq!(app.connection, ConnectionStatus::Lost);
         assert_eq!(
-            app.status.as_deref(),
+            app.status_text(),
             Some("no cached credentials; restart lightify to log in again")
         );
     }
@@ -510,7 +546,7 @@ mod tests {
         let effects = update(&mut app, Input::Action(Action::Refresh));
         assert_eq!(effects, vec![Effect::Player(PlayerCommand::Reconnect)]);
         assert_eq!(app.connection, ConnectionStatus::Reconnecting);
-        assert_eq!(app.status.as_deref(), Some("reconnecting"));
+        assert_eq!(app.status_text(), Some("reconnecting"));
     }
 
     #[test]
@@ -562,7 +598,6 @@ mod tests {
         update(&mut app, player(PlayerUpdate::Reconnected));
         let status = app.status.clone();
 
-        // A new pagination request must not be cleared by the old response.
         app.loading_more = true;
         let error = || librespot::core::Error::unavailable("late failure");
         for message in [
@@ -610,7 +645,7 @@ mod tests {
                 result: Err(error()),
             }),
         );
-        assert!(app.status.as_deref().unwrap().contains("late failure"));
+        assert!(app.status_text().unwrap().contains("late failure"));
     }
 
     #[test]
@@ -859,7 +894,7 @@ mod tests {
                 result: Err(err),
             }),
         );
-        assert!(app.status.as_deref().unwrap_or("").contains("boom"));
+        assert!(app.status_text().unwrap_or("").contains("boom"));
     }
 
     #[test]
@@ -906,6 +941,7 @@ mod tests {
                 artists: vec![],
                 album: "".into(),
                 duration_ms: 100_000,
+                uri: "spotify:track:t".into(),
             })),
         );
         update(
@@ -946,5 +982,38 @@ mod tests {
     fn tick_produces_no_effects() {
         let mut app = App::new();
         assert!(update(&mut app, Input::Message(Message::Tick)).is_empty());
+    }
+
+    #[test]
+    fn library_errors_are_error_status() {
+        let mut app = App::new();
+        report_error(&mut app, &librespot::core::Error::unavailable("boom"));
+        assert!(matches!(app.status, Some(Status::Error(_))));
+        assert!(app.status_text().unwrap_or("").contains("boom"));
+    }
+
+    #[test]
+    fn reconnecting_is_info_status() {
+        let mut app = App::new();
+        app.connection = ConnectionStatus::Lost;
+        update(&mut app, Input::Action(Action::Refresh));
+        assert_eq!(app.status, Some(Status::Info("reconnecting".to_string())));
+    }
+
+    #[test]
+    fn playing_uri_follows_track_changed() {
+        let mut app = App::new();
+        assert_eq!(app.playing_uri(), None);
+        update(
+            &mut app,
+            Input::Message(Message::Player(PlayerUpdate::TrackChanged {
+                uri: "spotify:track:abc".to_string(),
+                name: "Song".to_string(),
+                artists: vec![],
+                album: String::new(),
+                duration_ms: 1000,
+            })),
+        );
+        assert_eq!(app.playing_uri(), Some("spotify:track:abc"));
     }
 }

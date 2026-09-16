@@ -11,7 +11,9 @@ futures = "0.3.34"
 librespot = "0.8.0"
 librespot-oauth = "0.8.0"
 protobuf = "3.7"
-ratatui = "0.30.2"
+ratatui = { version = "0.30.2", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+toml = "1"
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 tracing = "0.1.44"

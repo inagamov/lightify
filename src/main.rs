@@ -3,6 +3,7 @@ mod app;
 mod config;
 mod message;
 mod spotify;
+mod theme;
 mod ui;
 
 use std::time::Duration;
@@ -13,8 +14,10 @@ use ratatui::DefaultTerminal;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::time::MissedTickBehavior;
 
+use crate::app::Status;
 use crate::spotify::library::Library;
 use crate::spotify::player::PlayerCommand;
+use crate::theme::Theme;
 use action::Action;
 use app::{App, Effect, Input, LibraryRequest, update};
 use message::Message;
@@ -32,6 +35,8 @@ async fn main() -> anyhow::Result<()> {
         .init();
     tracing::info!("lightify starting");
 
+    let config = config::Config::load()?;
+
     let login = spotify::auth::login(&cache_dir).await?;
 
     let (tx, rx) = mpsc::unbounded_channel::<Message>();
@@ -41,7 +46,15 @@ async fn main() -> anyhow::Result<()> {
 
     let mut terminal = ratatui::init();
     let library = Library::new(login.session.clone());
-    let result = run(&mut terminal, library, player.commands.clone(), tx, rx).await;
+    let result = run(
+        &mut terminal,
+        library,
+        player.commands.clone(),
+        tx,
+        rx,
+        config.theme,
+    )
+    .await;
     ratatui::restore();
 
     player.shutdown().await;
@@ -55,8 +68,9 @@ async fn run(
     player: UnboundedSender<PlayerCommand>,
     tx: UnboundedSender<Message>,
     mut rx: UnboundedReceiver<Message>,
+    theme: Theme,
 ) -> anyhow::Result<()> {
-    let mut app = App::new();
+    let mut app = App::new().with_theme(theme);
 
     let mut events = EventStream::new();
 
@@ -108,7 +122,7 @@ fn send_player_command(
     if player.send(command).is_err() {
         tracing::error!("player task is gone");
         app.connection = app::ConnectionStatus::Lost;
-        app.status = Some("player stopped".to_string());
+        app.status = Some(Status::Error("player stopped".to_string()));
     }
 }
 
@@ -192,7 +206,7 @@ mod tests {
             send_player_command(&mut app, &player, PlayerCommand::Reconnect);
 
             assert_eq!(app.connection, ConnectionStatus::Lost);
-            assert_eq!(app.status.as_deref(), Some("player stopped"));
+            assert_eq!(app.status_text(), Some("player stopped"));
         }
     }
 }
