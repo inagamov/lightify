@@ -1,15 +1,25 @@
+use std::future::Future;
+use std::ops::ControlFlow;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
 use librespot::connect::{ConnectConfig, LoadRequest, LoadRequestOptions, PlayingTrack, Spirc};
 use librespot::core::Session;
 use librespot::core::authentication::Credentials;
 use librespot::metadata::audio::UniqueFields;
 use librespot::playback::config::{AudioFormat, PlayerConfig};
-use librespot::playback::mixer::MixerConfig;
-use librespot::playback::player::{Player, PlayerEvent};
+use librespot::playback::mixer::{Mixer, MixerConfig};
+use librespot::playback::player::{Player, PlayerEvent, PlayerEventChannel};
 use librespot::playback::{audio_backend, mixer};
 use thiserror::Error;
-use tokio::sync::mpsc::{self, UnboundedSender};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::task::JoinHandle;
+use tokio::time::{Sleep, Timeout, sleep, timeout};
 
 use crate::message::Message;
+use crate::spotify::reconnect::Reconnector;
+use crate::spotify::session::SessionHandle;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlayerCommand {
@@ -22,6 +32,7 @@ pub enum PlayerCommand {
     Prev,
     Seek(u32),
     SetVolume(u16),
+    Reconnect,
     Shutdown,
 }
 
@@ -30,11 +41,20 @@ pub enum PlayerError {
     #[error("no audio backend available")]
     NoBackend,
 
+    #[error("no mixer available")]
+    NoMixer,
+
     #[error("could not create mixer: {0}")]
     Mixer(#[source] librespot::core::Error),
 
-    #[error("could not start Spotify Connect device: {0}")]
+    #[error("could not start spotify connect device: {0}")]
     Spirc(#[source] librespot::core::Error),
+
+    #[error("no cached credentials; restart lightify to log in again")]
+    NoCredentials,
+
+    #[error("connection attempt timed out")]
+    Timeout,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,62 +76,370 @@ pub enum PlayerUpdate {
     },
     Volume(u16),
     Stopped,
+    Disconnected,
+    Reconnected,
+    ConnectionLost(Option<String>),
+}
+
+pub struct PlayerHandle {
+    pub commands: UnboundedSender<PlayerCommand>,
+    task: JoinHandle<()>,
+}
+
+impl PlayerHandle {
+    pub async fn shutdown(mut self) {
+        let _ = self.commands.send(PlayerCommand::Shutdown);
+        match timeout(Duration::from_secs(10), &mut self.task).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => tracing::error!("player task failed: {error}"),
+            Err(_) => {
+                tracing::warn!("player task did not stop in time");
+                self.task.abort();
+                let _ = self.task.await;
+            }
+        }
+    }
+}
+
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const QUIT_TIMEOUT: Duration = Duration::from_secs(2);
+const SESSION_CHECK: Duration = Duration::from_secs(1);
+
+type SpircTask = Pin<Box<dyn Future<Output = ()> + Send>>;
+type Attempt = Pin<Box<dyn Future<Output = Result<Connected, PlayerError>> + Send>>;
+type Cleanup = Pin<Box<Timeout<SpircTask>>>;
+
+struct Connected {
+    spirc: Spirc,
+    task: SpircTask,
+    session: Session,
+}
+
+enum Connection {
+    Up(Connected),
+    Draining { cleanup: Cleanup },
+    Waiting { until: Pin<Box<Sleep>> },
+    Connecting { attempt: Attempt, manual: bool },
+    Down,
+}
+
+enum ConnectionEvent {
+    ConnectionDead {
+        task_finished: bool,
+    },
+    Drained {
+        in_time: bool,
+    },
+    RetryDue,
+    AttemptFinished {
+        result: Result<Connected, PlayerError>,
+        manual: bool,
+    },
+}
+
+impl Connection {
+    async fn event(&mut self) -> ConnectionEvent {
+        match self {
+            Connection::Up(Connected { task, session, .. }) => {
+                let mut check = tokio::time::interval(SESSION_CHECK);
+                loop {
+                    tokio::select! {
+                        () = task.as_mut() => {
+                            return ConnectionEvent::ConnectionDead { task_finished: true };
+                        }
+                        _ = check.tick() => {
+                            if session.is_invalid() {
+                                return ConnectionEvent::ConnectionDead { task_finished: false };
+                            }
+                        }
+                    }
+                }
+            }
+            Connection::Draining { cleanup } => {
+                let in_time = cleanup.as_mut().await.is_ok();
+                ConnectionEvent::Drained { in_time }
+            }
+            Connection::Waiting { until } => {
+                until.as_mut().await;
+                ConnectionEvent::RetryDue
+            }
+            Connection::Connecting { attempt, manual } => ConnectionEvent::AttemptFinished {
+                result: attempt.as_mut().await,
+                manual: *manual,
+            },
+            Connection::Down => std::future::pending().await,
+        }
+    }
+
+    async fn quit(self) {
+        match self {
+            Connection::Up(Connected { spirc, task, .. }) => {
+                if let Err(error) = spirc.shutdown() {
+                    tracing::error!("spirc shutdown failed: {error}");
+                }
+                if timeout(QUIT_TIMEOUT, task).await.is_err() {
+                    tracing::warn!("spirc did not shut down in time");
+                }
+            }
+            Connection::Draining { cleanup } => match timeout(QUIT_TIMEOUT, cleanup).await {
+                Ok(Ok(())) => {}
+                Ok(Err(_)) | Err(_) => {
+                    tracing::warn!("spirc cleanup did not finish in time");
+                }
+            },
+            Connection::Connecting { .. } | Connection::Waiting { .. } | Connection::Down => {}
+        }
+    }
+}
+
+struct PlayerTask {
+    session: SessionHandle,
+    player: Arc<Player>,
+    mixer: Arc<dyn Mixer>,
+    connect_config: ConnectConfig,
+    connection: Connection,
+    reconnector: Reconnector,
+    tx: UnboundedSender<Message>,
+}
+
+impl PlayerTask {
+    async fn run(
+        mut self,
+        mut commands: UnboundedReceiver<PlayerCommand>,
+        mut events: PlayerEventChannel,
+    ) {
+        loop {
+            tokio::select! {
+                command = commands.recv() => match command {
+                    Some(command) => {
+                        if self.handle_command(command).is_break() {
+                            break;
+                        }
+                    }
+                    None => break,
+                },
+                Some(event) = events.recv() => {
+                    if let Some(update) = translate(event) {
+                        let _ = self.tx.send(Message::Player(update));
+                    }
+                }
+                event = self.connection.event() => self.handle_connection_event(event),
+            }
+        }
+        self.shutdown().await;
+    }
+
+    fn handle_command(&mut self, command: PlayerCommand) -> ControlFlow<()> {
+        match command {
+            PlayerCommand::Shutdown => ControlFlow::Break(()),
+            PlayerCommand::Reconnect => {
+                match self.connection {
+                    Connection::Waiting { .. } | Connection::Down => {
+                        tracing::info!("manual reconnect");
+                        self.connection = Connection::Connecting {
+                            attempt: self.attempt(),
+                            manual: true,
+                        };
+                    }
+                    Connection::Up(_)
+                    | Connection::Draining { .. }
+                    | Connection::Connecting { .. } => {
+                        tracing::info!("reconnect requested while busy; ignored");
+                    }
+                }
+                ControlFlow::Continue(())
+            }
+            command => {
+                match &self.connection {
+                    Connection::Up(Connected { spirc, .. }) => {
+                        if let Err(error) = handle(spirc, command) {
+                            tracing::error!("player command failed: {error}");
+                        }
+                    }
+                    _ => tracing::warn!(?command, "dropped: not connected"),
+                }
+                ControlFlow::Continue(())
+            }
+        }
+    }
+
+    async fn shutdown(&mut self) {
+        std::mem::replace(&mut self.connection, Connection::Down)
+            .quit()
+            .await;
+    }
+
+    fn attempt(&self) -> Attempt {
+        let session = self.session.clone();
+        let player = self.player.clone();
+        let mixer = self.mixer.clone();
+        let config = ConnectConfig {
+            initial_volume: mixer.volume(),
+            ..self.connect_config.clone()
+        };
+        Box::pin(async move {
+            timeout(CONNECT_TIMEOUT, reconnect(session, player, mixer, config))
+                .await
+                .unwrap_or(Err(PlayerError::Timeout))
+        })
+    }
+
+    fn handle_connection_event(&mut self, event: ConnectionEvent) {
+        match event {
+            ConnectionEvent::ConnectionDead { task_finished } => {
+                tracing::warn!("connection to spotify dropped");
+                let _ = self.tx.send(Message::Player(PlayerUpdate::Disconnected));
+                let old = std::mem::replace(&mut self.connection, Connection::Down);
+                self.connection = match old {
+                    Connection::Up(Connected { task, .. }) if !task_finished => {
+                        tracing::info!("waiting for spirc cleanup");
+                        Connection::Draining {
+                            cleanup: Box::pin(timeout(SHUTDOWN_TIMEOUT, task)),
+                        }
+                    }
+                    _ => self.schedule_retry(),
+                };
+            }
+            ConnectionEvent::Drained { in_time } => {
+                if in_time {
+                    tracing::info!("spirc cleanup finished");
+                } else {
+                    tracing::warn!("spirc cleanup timed out; dropped");
+                }
+                self.connection = self.schedule_retry();
+            }
+            ConnectionEvent::RetryDue => {
+                self.connection = Connection::Connecting {
+                    attempt: self.attempt(),
+                    manual: false,
+                };
+            }
+            ConnectionEvent::AttemptFinished {
+                result: Ok(connected),
+                ..
+            } => {
+                tracing::info!("reconnected");
+                self.reconnector.reset();
+                self.connection = Connection::Up(connected);
+                let _ = self.tx.send(Message::Player(PlayerUpdate::Reconnected));
+            }
+            ConnectionEvent::AttemptFinished {
+                result: Err(error),
+                manual,
+            } => {
+                tracing::error!("reconnect failed: {error}");
+                let hopeless = matches!(error, PlayerError::NoCredentials);
+                self.connection = if manual || hopeless {
+                    self.give_up(Some(error.to_string()))
+                } else {
+                    self.schedule_retry()
+                };
+            }
+        }
+    }
+
+    fn schedule_retry(&mut self) -> Connection {
+        match self.reconnector.next_delay(Instant::now()) {
+            Some(delay) => {
+                tracing::info!(?delay, "next reconnect attempt");
+                Connection::Waiting {
+                    until: Box::pin(sleep(delay)),
+                }
+            }
+            None => self.give_up(None),
+        }
+    }
+
+    fn give_up(&self, error: Option<String>) -> Connection {
+        tracing::error!("not reconnecting automatically");
+        let _ = self
+            .tx
+            .send(Message::Player(PlayerUpdate::ConnectionLost(error)));
+        Connection::Down
+    }
+}
+
+async fn reconnect(
+    handle: SessionHandle,
+    player: Arc<Player>,
+    mixer: Arc<dyn Mixer>,
+    config: ConnectConfig,
+) -> Result<Connected, PlayerError> {
+    let credentials = handle.credentials().ok_or(PlayerError::NoCredentials)?;
+    let session = handle.reconnect();
+    player.set_session(session.clone());
+    connect(config, session, credentials, player, mixer).await
+}
+
+async fn connect(
+    config: ConnectConfig,
+    session: Session,
+    credentials: Credentials,
+    player: Arc<Player>,
+    mixer: Arc<dyn Mixer>,
+) -> Result<Connected, PlayerError> {
+    let (spirc, task) = Spirc::new(config, session.clone(), credentials, player, mixer)
+        .await
+        .map_err(PlayerError::Spirc)?;
+    Ok(Connected {
+        spirc,
+        task: Box::pin(task),
+        session,
+    })
 }
 
 pub async fn start(
-    session: Session,
+    session: SessionHandle,
     credentials: Credentials,
     tx: UnboundedSender<Message>,
-) -> Result<UnboundedSender<PlayerCommand>, PlayerError> {
+) -> Result<PlayerHandle, PlayerError> {
     let backend = audio_backend::find(None).ok_or(PlayerError::NoBackend)?;
 
-    let mixer_builder = mixer::find(None).ok_or(PlayerError::NoBackend)?;
+    let mixer_builder = mixer::find(None).ok_or(PlayerError::NoMixer)?;
     let mixer = mixer_builder(MixerConfig::default()).map_err(PlayerError::Mixer)?;
 
+    let current = session.get();
     let player = Player::new(
         PlayerConfig::default(),
-        session.clone(),
+        current.clone(),
         mixer.get_soft_volume(),
         move || backend(None, AudioFormat::default()),
     );
-
-    let mut events = player.get_player_event_channel();
+    let events = player.get_player_event_channel();
 
     let connect_config = ConnectConfig {
         name: "lightify".to_string(),
         ..ConnectConfig::default()
     };
 
-    let (spirc, spirc_task) = Spirc::new(connect_config, session, credentials, player, mixer)
-        .await
-        .map_err(PlayerError::Spirc)?;
-    tokio::spawn(spirc_task);
+    let connected = connect(
+        connect_config.clone(),
+        current,
+        credentials,
+        player.clone(),
+        mixer.clone(),
+    )
+    .await?;
 
-    let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<PlayerCommand>();
-
-    tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                Some(command) = cmd_rx.recv() => {
-                    let is_shutdown = command == PlayerCommand::Shutdown;
-                    if let Err(error) = handle(&spirc, command) {
-                        tracing::error!("player command failed: {error}");
-                    }
-                    if is_shutdown {
-                        break;
-                    }
-                }
-                Some(event) = events.recv() => {
-                    if let Some(update) = translate(event) {
-                        let _ = tx.send(Message::Player(update));
-                    }
-                }
-                else => break,
-            }
+    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<PlayerCommand>();
+    let task = tokio::spawn(
+        PlayerTask {
+            session,
+            player,
+            mixer,
+            connect_config,
+            connection: Connection::Up(connected),
+            reconnector: Reconnector::default(),
+            tx,
         }
-    });
+        .run(cmd_rx, events),
+    );
 
-    Ok(cmd_tx)
+    Ok(PlayerHandle {
+        commands: cmd_tx,
+        task,
+    })
 }
 
 fn handle(spirc: &Spirc, command: PlayerCommand) -> Result<(), librespot::core::Error> {
@@ -130,7 +458,7 @@ fn handle(spirc: &Spirc, command: PlayerCommand) -> Result<(), librespot::core::
         PlayerCommand::Prev => spirc.prev(),
         PlayerCommand::Seek(position_ms) => spirc.set_position_ms(position_ms),
         PlayerCommand::SetVolume(volume) => spirc.set_volume(volume),
-        PlayerCommand::Shutdown => spirc.shutdown(),
+        PlayerCommand::Reconnect | PlayerCommand::Shutdown => Ok(()),
     }
 }
 
@@ -182,5 +510,43 @@ mod tests {
     fn irrelevant_events_are_dropped() {
         let update = translate(PlayerEvent::ShuffleChanged { shuffle: true });
         assert_eq!(update, None);
+    }
+
+    fn stuck_spirc() -> SpircTask {
+        Box::pin(std::future::pending())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn quit_while_draining_is_bounded_by_quit_timeout() {
+        let cleanup = Box::pin(timeout(SHUTDOWN_TIMEOUT, stuck_spirc()));
+        let connection = Connection::Draining { cleanup };
+
+        let started = tokio::time::Instant::now();
+        connection.quit().await;
+
+        assert_eq!(started.elapsed(), QUIT_TIMEOUT);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn quit_while_draining_returns_as_soon_as_cleanup_finishes() {
+        let cleanup = Box::pin(timeout(SHUTDOWN_TIMEOUT, Box::pin(async {}) as SpircTask));
+        let connection = Connection::Draining { cleanup };
+
+        let started = tokio::time::Instant::now();
+        connection.quit().await;
+
+        assert_eq!(started.elapsed(), Duration::ZERO);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn quit_while_waiting_does_not_wait_out_the_retry() {
+        let connection = Connection::Waiting {
+            until: Box::pin(sleep(Duration::from_secs(60))),
+        };
+
+        let started = tokio::time::Instant::now();
+        connection.quit().await;
+
+        assert_eq!(started.elapsed(), Duration::ZERO);
     }
 }

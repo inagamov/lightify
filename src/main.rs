@@ -11,6 +11,7 @@ use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind};
 use futures::StreamExt;
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::time::MissedTickBehavior;
 
 use crate::spotify::library::Library;
 use crate::spotify::player::PlayerCommand;
@@ -40,8 +41,10 @@ async fn main() -> anyhow::Result<()> {
 
     let mut terminal = ratatui::init();
     let library = Library::new(login.session.clone());
-    let result = run(&mut terminal, library, player, tx, rx).await;
+    let result = run(&mut terminal, library, player.commands.clone(), tx, rx).await;
     ratatui::restore();
+
+    player.shutdown().await;
     login.session.shutdown();
     result
 }
@@ -60,19 +63,17 @@ async fn run(
     let mut pending = update(&mut app, Input::Action(Action::Refresh));
     let mut tick = tokio::time::interval(Duration::from_millis(250));
 
+    tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
     loop {
         for effect in pending.drain(..) {
             match effect {
-                Effect::Quit => {
-                    let _ = player.send(PlayerCommand::Shutdown);
-                    return Ok(());
+                Effect::Quit => return Ok(()),
+                Effect::Api(request) => {
+                    spawn_api(request, app.library_generation, library.clone(), tx.clone())
                 }
-                Effect::Api(request) => spawn_api(request, library.clone(), tx.clone()),
                 Effect::Player(command) => {
-                    if player.send(command).is_err() {
-                        tracing::error!("player task is gone");
-                        app.status = Some("player stopped".to_string());
-                    }
+                    send_player_command(&mut app, &player, command);
                 }
             }
         }
@@ -96,6 +97,18 @@ async fn run(
         };
 
         pending = update(&mut app, input);
+    }
+}
+
+fn send_player_command(
+    app: &mut App,
+    player: &UnboundedSender<PlayerCommand>,
+    command: PlayerCommand,
+) {
+    if player.send(command).is_err() {
+        tracing::error!("player task is gone");
+        app.connection = app::ConnectionStatus::Lost;
+        app.status = Some("player stopped".to_string());
     }
 }
 
@@ -123,15 +136,49 @@ fn key_to_action(key: KeyEvent) -> Option<Action> {
     }
 }
 
-fn spawn_api(request: LibraryRequest, library: Library, tx: UnboundedSender<Message>) {
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use app::ConnectionStatus;
+
+    #[test]
+    fn failed_reconnect_send_leaves_refresh_retryable() {
+        let (player, receiver) = mpsc::unbounded_channel();
+        drop(receiver);
+        let mut app = App::new();
+        app.connection = ConnectionStatus::Lost;
+
+        for _ in 0..2 {
+            let effects = update(&mut app, Input::Action(Action::Refresh));
+            assert_eq!(effects, vec![Effect::Player(PlayerCommand::Reconnect)]);
+            assert_eq!(app.connection, ConnectionStatus::Reconnecting);
+
+            send_player_command(&mut app, &player, PlayerCommand::Reconnect);
+
+            assert_eq!(app.connection, ConnectionStatus::Lost);
+            assert_eq!(app.status.as_deref(), Some("player stopped"));
+        }
+    }
+}
+
+fn spawn_api(
+    request: LibraryRequest,
+    generation: u64,
+    library: Library,
+    tx: UnboundedSender<Message>,
+) {
     tracing::info!(?request, "api request");
 
     tokio::spawn(async move {
         let message = match request {
-            LibraryRequest::Playlists => Message::Playlists(library.my_playlists().await),
+            LibraryRequest::Playlists => Message::Playlists {
+                generation,
+                result: library.my_playlists().await,
+            },
             LibraryRequest::PlaylistTracks { id } => {
                 let result = library.first_page(&id).await;
                 Message::Tracks {
+                    generation,
                     playlist_id: id,
                     result,
                 }
@@ -139,6 +186,7 @@ fn spawn_api(request: LibraryRequest, library: Library, tx: UnboundedSender<Mess
             LibraryRequest::MoreTracks { playlist_id, uris } => {
                 let result = library.track_details(uris).await;
                 Message::MoreTracks {
+                    generation,
                     playlist_id,
                     result,
                 }

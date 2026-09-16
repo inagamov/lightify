@@ -6,12 +6,17 @@ use crate::spotify::player::PlayerUpdate;
 
 #[derive(Debug)]
 pub enum Message {
-    Playlists(Result<Vec<Playlist>, Error>),
+    Playlists {
+        generation: u64,
+        result: Result<Vec<Playlist>, Error>,
+    },
     Tracks {
+        generation: u64,
         playlist_id: String,
         result: Result<TracksPage, Error>,
     },
     MoreTracks {
+        generation: u64,
         playlist_id: String,
         result: Result<Vec<Track>, Error>,
     },
