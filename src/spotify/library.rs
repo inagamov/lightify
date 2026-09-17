@@ -2,11 +2,14 @@ use futures::{StreamExt, TryStreamExt, stream};
 use librespot::{
     core::{SpotifyId, SpotifyUri},
     metadata::{self, Metadata},
-    protocol::playlist4_external::{Item, MetaItem, SelectedListContent},
+    protocol::{
+        context::Context,
+        playlist4_external::{Item, MetaItem, SelectedListContent},
+    },
 };
 use protobuf::Message;
 
-use crate::spotify::model::{Playlist, Track};
+use crate::spotify::model::{LibraryItem, Source, Track};
 use crate::spotify::session::SessionHandle;
 
 const ROOTLIST_PAGE: usize = 120;
@@ -29,9 +32,13 @@ impl Library {
         Self { session }
     }
 
-    pub async fn my_playlists(&self) -> Result<Vec<Playlist>, librespot::core::Error> {
+    pub async fn my_playlists(&self) -> Result<Vec<LibraryItem>, librespot::core::Error> {
         let session = self.session.get();
-        let mut playlists = Vec::new();
+        let mut playlists = vec![LibraryItem {
+            source: Source::LikedSongs,
+            name: "Liked Songs".into(),
+            track_count: self.liked_tracks().await?.len(),
+        }];
         let mut from = 0;
         loop {
             let bytes = session
@@ -50,18 +57,34 @@ impl Library {
         Ok(playlists)
     }
 
-    pub async fn playlist_tracks(&self, id: &str) -> Result<Vec<String>, librespot::core::Error> {
+    pub async fn playlist_tracks(
+        &self,
+        source: &Source,
+    ) -> Result<Vec<String>, librespot::core::Error> {
         let session = self.session.get();
-        let uri = SpotifyUri::Playlist {
-            user: None,
-            id: SpotifyId::from_base62(id)?,
-        };
-        let playlist = metadata::Playlist::get(&session, &uri).await?;
-        playlist
-            .tracks()
-            .filter(|uri| matches!(uri, SpotifyUri::Track { .. }))
-            .map(SpotifyUri::to_uri)
-            .collect()
+        match source {
+            Source::LikedSongs => self.liked_tracks().await,
+            Source::Playlist(id) => {
+                let uri = SpotifyUri::Playlist {
+                    user: None,
+                    id: SpotifyId::from_base62(id)?,
+                };
+
+                let playlist = metadata::Playlist::get(&session, &uri).await?;
+                playlist
+                    .tracks()
+                    .filter(|uri| matches!(uri, SpotifyUri::Track { .. }))
+                    .map(SpotifyUri::to_uri)
+                    .collect()
+            }
+        }
+    }
+
+    async fn liked_tracks(&self) -> Result<Vec<String>, librespot::core::Error> {
+        let session = self.session.get();
+        let uri = format!("spotify:user:{}:collection", session.username());
+        let context = session.spclient().get_context(&uri).await?;
+        Ok(to_uris(&context))
     }
 
     pub async fn track_details(
@@ -83,15 +106,15 @@ impl Library {
             .await
     }
 
-    pub async fn first_page(&self, id: &str) -> Result<TracksPage, librespot::core::Error> {
-        let uris = self.playlist_tracks(id).await?;
+    pub async fn first_page(&self, source: &Source) -> Result<TracksPage, librespot::core::Error> {
+        let uris = self.playlist_tracks(source).await?;
         let first = uris.iter().take(PAGE_SIZE).cloned().collect::<Vec<_>>();
         let tracks = self.track_details(first).await?;
         Ok(TracksPage { uris, tracks })
     }
 }
 
-fn to_playlists(items: &[Item], meta_items: &[MetaItem]) -> Vec<Playlist> {
+fn to_playlists(items: &[Item], meta_items: &[MetaItem]) -> Vec<LibraryItem> {
     if items.len() != meta_items.len() {
         tracing::warn!(
             "rootlist has {} items but {} meta items",
@@ -106,12 +129,27 @@ fn to_playlists(items: &[Item], meta_items: &[MetaItem]) -> Vec<Playlist> {
             let SpotifyUri::Playlist { id, .. } = SpotifyUri::from_uri(item.uri()).ok()? else {
                 return None;
             };
-            Some(Playlist {
-                id: id.to_base62().ok()?,
+            Some(LibraryItem {
+                source: Source::Playlist(id.to_base62().ok()?),
                 name: meta.attributes.name().to_string(),
                 track_count: usize::try_from(meta.length()).unwrap_or(0),
             })
         })
+        .collect()
+}
+
+fn to_uris(context: &Context) -> Vec<String> {
+    context
+        .pages
+        .iter()
+        .flat_map(|page| &page.tracks)
+        .filter(|track| {
+            matches!(
+                SpotifyUri::from_uri(track.uri()),
+                Ok(SpotifyUri::Track { .. })
+            )
+        })
+        .map(|track| track.uri().to_string())
         .collect()
 }
 
@@ -153,11 +191,35 @@ mod tests {
         let playlists = to_playlists(&[a, f], &[a_meta, f_meta]);
         assert_eq!(
             playlists,
-            vec![Playlist {
-                id: "37i9dQZF1DXcBWIGoYBM5M".into(),
+            vec![LibraryItem {
+                source: Source::Playlist("37i9dQZF1DXcBWIGoYBM5M".into()),
                 name: "Hits".into(),
                 track_count: 50,
             }]
+        );
+    }
+
+    #[test]
+    fn liked_songs_context_yields_track_uris_only() {
+        use librespot::protocol::context_page::ContextPage;
+        use librespot::protocol::context_track::ContextTrack;
+
+        let track = |uri: &str| {
+            let mut track = ContextTrack::new();
+            track.set_uri(uri.to_string());
+            track
+        };
+        let mut page = ContextPage::new();
+        page.tracks = vec![
+            track("spotify:track:6ZmzpDDsIJzKHFzxb5cOMj"),
+            track("spotify:episode:5vCQaHkfRFsEUEYGHxbBqm"),
+        ];
+        let mut context = Context::new();
+        context.pages = vec![page];
+
+        assert_eq!(
+            to_uris(&context),
+            vec!["spotify:track:6ZmzpDDsIJzKHFzxb5cOMj".to_string()]
         );
     }
 

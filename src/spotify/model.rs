@@ -1,6 +1,12 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Playlist {
-    pub id: String,
+pub enum Source {
+    LikedSongs,
+    Playlist(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryItem {
+    pub source: Source,
     pub name: String,
     pub track_count: usize,
 }

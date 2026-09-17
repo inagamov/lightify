@@ -5,7 +5,7 @@ use ratatui::widgets::ListState;
 use crate::action::Action;
 use crate::message::Message;
 use crate::spotify::library::PAGE_SIZE;
-use crate::spotify::model::{Playlist, Track};
+use crate::spotify::model::{LibraryItem, Source, Track};
 use crate::spotify::player::{PlayerCommand, PlayerUpdate};
 use crate::theme::Theme;
 
@@ -31,13 +31,8 @@ pub enum Input {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LibraryRequest {
     Playlists,
-    PlaylistTracks {
-        id: String,
-    },
-    MoreTracks {
-        playlist_id: String,
-        uris: Vec<String>,
-    },
+    PlaylistTracks { source: Source },
+    MoreTracks { source: Source, uris: Vec<String> },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -125,11 +120,11 @@ pub struct App {
     pub focus: Focus,
     pub connection: ConnectionStatus,
     pub library_generation: u64,
-    pub playlists: Vec<Playlist>,
+    pub playlists: Vec<LibraryItem>,
     pub sidebar: ListState,
     pub tracks: Vec<Track>,
     pub track_list: ListState,
-    pub tracks_for: Option<String>,
+    pub tracks_for: Option<Source>,
     pub track_uris: Vec<String>,
     pub loading_more: bool,
     pub status: Option<Status>,
@@ -156,17 +151,17 @@ impl App {
         }
     }
 
-    pub fn selected_playlist(&self) -> Option<&Playlist> {
+    pub fn selected_playlist(&self) -> Option<&LibraryItem> {
         self.sidebar.selected().and_then(|i| self.playlists.get(i))
     }
 
-    pub fn is_showing(&self, playlist_id: &str) -> bool {
-        self.tracks_for.as_deref() == Some(playlist_id)
+    pub fn is_showing(&self, source: &Source) -> bool {
+        self.tracks_for.as_ref() == Some(source)
     }
 
-    pub fn showing_playlist(&self) -> Option<&Playlist> {
-        let id = self.tracks_for.as_deref()?;
-        self.playlists.iter().find(|p| p.id == id)
+    pub fn showing_playlist(&self) -> Option<&LibraryItem> {
+        let source = self.tracks_for.as_ref()?;
+        self.playlists.iter().find(|p| &p.source == source)
     }
 
     pub fn with_theme(mut self, theme: Theme) -> Self {
@@ -282,8 +277,8 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
             app.playlists = playlists;
             app.sidebar.select(Some(0));
 
-            match app.playlists.first().map(|p| p.id.clone()) {
-                Some(id) => request_tracks(app, id),
+            match app.playlists.first().map(|p| p.source.clone()) {
+                Some(source) => request_tracks(app, source),
                 None => Vec::new(),
             }
         }
@@ -293,12 +288,8 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
             report_error(app, &error);
             Vec::new()
         }
-        Message::Tracks {
-            playlist_id,
-            result,
-            ..
-        } => {
-            if !app.is_showing(&playlist_id) {
+        Message::Tracks { source, result, .. } => {
+            if !app.is_showing(&source) {
                 return Vec::new();
             }
             match result {
@@ -311,12 +302,8 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
-        Message::MoreTracks {
-            playlist_id,
-            result,
-            ..
-        } => {
-            if !app.is_showing(&playlist_id) {
+        Message::MoreTracks { source, result, .. } => {
+            if !app.is_showing(&source) {
                 return Vec::new();
             }
             app.loading_more = false;
@@ -374,7 +361,7 @@ fn select_playlist(app: &mut App) -> Vec<Effect> {
     if !library_available(app) {
         return Vec::new();
     }
-    let Some(id) = app.selected_playlist().map(|p| p.id.clone()) else {
+    let Some(id) = app.selected_playlist().map(|p| p.source.clone()) else {
         return Vec::new();
     };
     app.focus = Focus::Main;
@@ -389,14 +376,14 @@ fn play_selected(app: &App) -> Vec<Effect> {
     vec![Effect::Player(PlayerCommand::Load { uris, start_index })]
 }
 
-fn request_tracks(app: &mut App, id: String) -> Vec<Effect> {
+fn request_tracks(app: &mut App, source: Source) -> Vec<Effect> {
     app.tracks.clear();
     app.track_list.select(None);
     app.track_uris.clear();
-    app.tracks_for = Some(id.clone());
+    app.tracks_for = Some(source.clone());
     app.loading_more = false;
 
-    vec![Effect::Api(LibraryRequest::PlaylistTracks { id })]
+    vec![Effect::Api(LibraryRequest::PlaylistTracks { source })]
 }
 
 fn focused_list(app: &mut App) -> (&mut ListState, usize) {
@@ -429,7 +416,7 @@ fn load_more_if_near_end(app: &mut App) -> Vec<Effect> {
     if selected + LOAD_MORE_MARGIN < app.tracks.len() {
         return Vec::new();
     }
-    let Some(playlist_id) = app.tracks_for.clone() else {
+    let Some(source) = app.tracks_for.clone() else {
         return Vec::new();
     };
     let uris: Vec<String> = app.track_uris[app.tracks.len()..]
@@ -442,10 +429,7 @@ fn load_more_if_near_end(app: &mut App) -> Vec<Effect> {
     }
 
     app.loading_more = true;
-    vec![Effect::Api(LibraryRequest::MoreTracks {
-        playlist_id,
-        uris,
-    })]
+    vec![Effect::Api(LibraryRequest::MoreTracks { source, uris })]
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -466,12 +450,12 @@ impl Status {
 mod tests {
     use super::*;
     use crate::spotify::library::TracksPage;
-    use crate::spotify::model::Playlist;
+    use crate::spotify::model::LibraryItem;
     use crate::spotify::player::PlayerCommand;
 
-    fn playlist(id: &str, name: &str) -> Playlist {
-        Playlist {
-            id: id.to_string(),
+    fn playlist(source: &str, name: &str) -> LibraryItem {
+        LibraryItem {
+            source: Source::Playlist(source.to_string()),
             name: name.to_string(),
             track_count: 0,
         }
@@ -579,7 +563,7 @@ mod tests {
             &mut app,
             Input::Message(Message::Tracks {
                 generation: 0,
-                playlist_id: "p0".into(),
+                source: Source::Playlist("p0".into()),
                 result: Ok(page(vec![track("t0")], PAGE_SIZE + 1)),
             }),
         );
@@ -607,12 +591,12 @@ mod tests {
             },
             Message::Tracks {
                 generation,
-                playlist_id: "p0".into(),
+                source: Source::Playlist("p0".into()),
                 result: Err(error()),
             },
             Message::MoreTracks {
                 generation,
-                playlist_id: "p0".into(),
+                source: Source::Playlist("p0".into()),
                 result: Err(error()),
             },
             Message::Playlists {
@@ -621,12 +605,12 @@ mod tests {
             },
             Message::Tracks {
                 generation,
-                playlist_id: "p0".into(),
+                source: Source::Playlist("p0".into()),
                 result: Ok(page(vec![], 0)),
             },
             Message::MoreTracks {
                 generation,
-                playlist_id: "p0".into(),
+                source: Source::Playlist("p0".into()),
                 result: Ok(vec![track("stale")]),
             },
         ] {
@@ -665,12 +649,12 @@ mod tests {
                 },
                 Message::Tracks {
                     generation: 0,
-                    playlist_id: "p0".into(),
+                    source: Source::Playlist("p0".into()),
                     result: Err(error()),
                 },
                 Message::MoreTracks {
                     generation: 0,
-                    playlist_id: "p0".into(),
+                    source: Source::Playlist("p0".into()),
                     result: Err(error()),
                 },
             ] {
@@ -718,7 +702,7 @@ mod tests {
             &mut app,
             Input::Message(Message::Tracks {
                 generation: 0,
-                playlist_id: "p0".into(),
+                source: Source::Playlist("p0".into()),
                 result: Ok(page(tracks, n)),
             }),
         );
@@ -734,7 +718,7 @@ mod tests {
             &mut app,
             Input::Message(Message::Tracks {
                 generation: 0,
-                playlist_id: "p0".into(),
+                source: Source::Playlist("p0".into()),
                 result: Ok(page(tracks, 51)),
             }),
         );
@@ -744,7 +728,7 @@ mod tests {
         assert_eq!(
             update(&mut app, Input::Action(Action::GoBottom)),
             vec![Effect::Api(LibraryRequest::MoreTracks {
-                playlist_id: "p0".into(),
+                source: Source::Playlist("p0".into()),
                 uris: vec!["spotify:track:t50".into()],
             })]
         );
@@ -755,7 +739,7 @@ mod tests {
             &mut app,
             Input::Message(Message::MoreTracks {
                 generation: 0,
-                playlist_id: "p0".into(),
+                source: Source::Playlist("p0".into()),
                 result: Ok(vec![track("t50")]),
             }),
         );
@@ -795,7 +779,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![Effect::Api(LibraryRequest::PlaylistTracks {
-                id: "p0".into()
+                source: Source::Playlist("p0".into())
             })]
         );
     }
@@ -841,11 +825,14 @@ mod tests {
         assert_eq!(
             effects,
             vec![Effect::Api(LibraryRequest::PlaylistTracks {
-                id: "p1".into()
+                source: Source::Playlist("p1".into())
             })]
         );
         assert_eq!(app.focus, Focus::Main);
-        assert_eq!(app.tracks_for.as_deref(), Some("p1"));
+        assert_eq!(
+            app.tracks_for.as_ref(),
+            Some(&Source::Playlist("p1".into()))
+        );
     }
 
     #[test]
@@ -856,7 +843,7 @@ mod tests {
             &mut app,
             Input::Message(Message::Tracks {
                 generation: 0,
-                playlist_id: "p0".into(),
+                source: Source::Playlist("p0".into()),
                 result: Ok(page(vec![], 3)),
             }),
         );
@@ -875,11 +862,14 @@ mod tests {
             &mut app,
             Input::Message(Message::Tracks {
                 generation: 0,
-                playlist_id: "p0".into(),
+                source: Source::Playlist("p0".into()),
                 result: Ok(page(vec![], 3)),
             }),
         );
-        assert_eq!(app.tracks_for.as_deref(), Some("p1"));
+        assert_eq!(
+            app.tracks_for.as_ref(),
+            Some(&Source::Playlist("p1".into()))
+        );
         assert!(app.track_uris.is_empty());
     }
 

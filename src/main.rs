@@ -175,19 +175,22 @@ fn spawn_api(
                 generation,
                 result: library.my_playlists().await,
             },
-            LibraryRequest::PlaylistTracks { id } => {
-                let result = library.first_page(&id).await;
+            LibraryRequest::PlaylistTracks { source } => {
+                let result = library.first_page(&source).await;
                 Message::Tracks {
                     generation,
-                    playlist_id: id,
+                    source,
                     result,
                 }
             }
-            LibraryRequest::MoreTracks { playlist_id, uris } => {
+            LibraryRequest::MoreTracks {
+                source,
+                uris,
+            } => {
                 let result = library.track_details(uris).await;
                 Message::MoreTracks {
                     generation,
-                    playlist_id,
+                    source,
                     result,
                 }
             }
