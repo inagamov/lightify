@@ -13,6 +13,9 @@ use futures::StreamExt;
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::time::MissedTickBehavior;
+use tracing::Level;
+use tracing_subscriber::filter::Targets;
+use tracing_subscriber::prelude::*;
 
 use crate::app::Status;
 use crate::spotify::library::Library;
@@ -29,9 +32,17 @@ async fn main() -> anyhow::Result<()> {
 
     let log_file = tracing_appender::rolling::never(&cache_dir, "lightify.log");
     let (writer, _guard) = tracing_appender::non_blocking(log_file);
-    tracing_subscriber::fmt()
-        .with_writer(writer)
-        .with_ansi(false)
+    let filter = Targets::new()
+        .with_default(Level::INFO)
+        .with_target("librespot_core::session", Level::TRACE)
+        .with_target("symphonia_bundle_mp3", Level::ERROR);
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(writer)
+                .with_ansi(false),
+        )
+        .with(filter)
         .init();
     tracing::info!("lightify starting");
 

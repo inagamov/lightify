@@ -28,7 +28,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
             Block::bordered()
                 .title(title)
                 .title_style(theme.title())
-                .border_style(theme.border(app.focus == Focus::Sidebar)),
+                .border_style(theme.border(app.focus == Focus::Main)),
         )
         .highlight_style(theme.selected());
 
