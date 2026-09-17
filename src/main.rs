@@ -139,6 +139,7 @@ fn send_player_command(
 
 fn key_to_action(key: KeyEvent) -> Option<Action> {
     match key.code {
+        KeyCode::Char(c) if c.is_ascii_digit() => Some(Action::Digit(c as u8 - b'0')),
         KeyCode::Char('j') | KeyCode::Down => Some(Action::MoveDown),
         KeyCode::Char('k') | KeyCode::Up => Some(Action::MoveUp),
         // TODO: switch to 'gg' (needs multi-key keymap)
@@ -183,10 +184,7 @@ fn spawn_api(
                     result,
                 }
             }
-            LibraryRequest::MoreTracks {
-                source,
-                uris,
-            } => {
+            LibraryRequest::MoreTracks { source, uris } => {
                 let result = library.track_details(uris).await;
                 Message::MoreTracks {
                     generation,
@@ -222,5 +220,21 @@ mod tests {
             assert_eq!(app.connection, ConnectionStatus::Lost);
             assert_eq!(app.status_text(), Some("player stopped"));
         }
+    }
+
+    #[test]
+    fn digit_keys_map_to_count_digits() {
+        assert_eq!(
+            key_to_action(KeyEvent::from(KeyCode::Char('3'))),
+            Some(Action::Digit(3))
+        );
+        assert_eq!(
+            key_to_action(KeyEvent::from(KeyCode::Char('0'))),
+            Some(Action::Digit(0))
+        );
+        assert_eq!(
+            key_to_action(KeyEvent::from(KeyCode::Char('n'))),
+            Some(Action::Next)
+        );
     }
 }

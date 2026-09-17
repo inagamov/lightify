@@ -20,6 +20,13 @@ trait Selectable {
         let current = self.selected().unwrap_or(0);
         self.select(Some(current.saturating_add_signed(delta).min(len - 1)));
     }
+
+    fn select_row(&mut self, len: usize, row: usize) {
+        if len == 0 {
+            return;
+        }
+        self.select(Some(row.saturating_sub(1).min(len - 1)));
+    }
 }
 
 impl Selectable for ListState {
@@ -149,6 +156,7 @@ impl Playback {
 
 pub struct App {
     pub focus: Focus,
+    pub pending_count: Option<usize>,
     pub connection: ConnectionStatus,
     pub library_generation: u64,
     pub playlists: Vec<LibraryItem>,
@@ -167,6 +175,7 @@ impl App {
     pub fn new() -> Self {
         Self {
             focus: Focus::Sidebar,
+            pending_count: None,
             connection: ConnectionStatus::Connected,
             library_generation: 0,
             playlists: Vec::new(),
@@ -180,6 +189,19 @@ impl App {
             playback: Playback::default(),
             theme: Theme::default(),
         }
+    }
+
+    pub fn push_digit(&mut self, digit: u8) {
+        if digit == 0 && self.pending_count.is_none() {
+            return;
+        }
+
+        let current = self.pending_count.unwrap_or(0);
+        self.pending_count = Some(
+            current
+                .saturating_mul(10)
+                .saturating_add(usize::from(digit)),
+        );
     }
 
     pub fn selected_playlist(&self) -> Option<&LibraryItem> {
@@ -218,15 +240,23 @@ pub fn update(app: &mut App, input: Input) -> Vec<Effect> {
 }
 
 pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
+    let count = match action {
+        Action::Digit(d) => {
+            app.push_digit(d);
+            return Vec::new();
+        }
+        _ => app.pending_count.take(),
+    };
+
     match action {
         Action::MoveDown => {
             let (state, len) = focused_list(app);
-            state.move_by(len, 1);
+            state.move_by(len, row_delta(count));
             load_more_if_near_end(app)
         }
         Action::MoveUp => {
             let (state, len) = focused_list(app);
-            state.move_by(len, -1);
+            state.move_by(len, -row_delta(count));
             load_more_if_near_end(app)
         }
         Action::GoTop => {
@@ -236,7 +266,10 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
         }
         Action::GoBottom => {
             let (state, len) = focused_list(app);
-            state.move_by(len, isize::MAX);
+            match count {
+                Some(row) => state.select_row(len, row),
+                None => state.move_by(len, isize::MAX),
+            }
             load_more_if_near_end(app)
         }
         Action::FocusSidebar => {
@@ -286,6 +319,7 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
             }
         },
         Action::Quit => vec![Effect::Quit],
+        Action::Digit(_) => unreachable!("digits return early above"),
     }
 }
 
@@ -422,6 +456,10 @@ fn focused_list(app: &mut App) -> (&mut dyn Selectable, usize) {
         Focus::Sidebar => (&mut app.sidebar, app.playlists.len()),
         Focus::Main => (&mut app.track_list, app.tracks.len()),
     }
+}
+
+fn row_delta(count: Option<usize>) -> isize {
+    isize::try_from(count.unwrap_or(1)).unwrap_or(isize::MAX)
 }
 
 const LOAD_MORE_MARGIN: usize = 10;
@@ -837,6 +875,52 @@ mod tests {
         update(&mut app, Input::Action(Action::MoveDown));
         update(&mut app, Input::Action(Action::GoBottom));
         assert_eq!(app.sidebar.selected(), Some(0));
+    }
+
+    #[test]
+    fn count_prefix_moves_down_that_many_rows() {
+        let mut app = app_with_playlists(9);
+
+        update(&mut app, Input::Action(Action::Digit(3)));
+        assert_eq!(app.sidebar.selected(), Some(0));
+
+        update(&mut app, Input::Action(Action::MoveDown));
+        assert_eq!(app.sidebar.selected(), Some(3));
+    }
+
+    #[test]
+    fn count_prefix_sends_go_bottom_to_that_row() {
+        let mut app = app_with_playlists(9);
+
+        update(&mut app, Input::Action(Action::Digit(4)));
+        update(&mut app, Input::Action(Action::GoBottom));
+        assert_eq!(app.sidebar.selected(), Some(3));
+
+        update(&mut app, Input::Action(Action::GoBottom));
+        assert_eq!(app.sidebar.selected(), Some(8));
+    }
+
+    #[test]
+    fn an_unrelated_action_clears_the_pending_count() {
+        let mut app = app_with_playlists(9);
+
+        update(&mut app, Input::Action(Action::Digit(5)));
+        update(&mut app, Input::Action(Action::PlayPause));
+        update(&mut app, Input::Action(Action::MoveDown));
+
+        assert_eq!(app.sidebar.selected(), Some(1));
+    }
+
+    #[test]
+    fn a_leading_zero_does_not_start_a_count() {
+        let mut app = app_with_playlists(9);
+
+        update(&mut app, Input::Action(Action::Digit(0)));
+        assert_eq!(app.pending_count, None);
+
+        update(&mut app, Input::Action(Action::Digit(1)));
+        update(&mut app, Input::Action(Action::Digit(0)));
+        assert_eq!(app.pending_count, Some(10));
     }
 
     #[test]

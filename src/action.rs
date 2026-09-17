@@ -1,5 +1,6 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
+    Digit(u8),
     MoveDown,
     MoveUp,
     GoTop,
