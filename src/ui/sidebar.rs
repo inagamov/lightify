@@ -36,10 +36,10 @@ mod tests {
     }
 
     #[test]
-    fn focused_border_uses_accent_and_unfocused_uses_dim() {
+    fn focused_border_uses_accent_and_unfocused_dims_text() {
         let theme = Theme {
             accent: Color::Rgb(1, 2, 3),
-            dim: Color::Rgb(4, 5, 6),
+            text: Color::Rgb(4, 5, 6),
             ..Theme::default()
         };
 
@@ -52,6 +52,6 @@ mod tests {
         app.focus = Focus::Main;
         let terminal = render(&mut app);
         let corner = terminal.backend().buffer().cell((0, 0)).unwrap();
-        assert_eq!(corner.fg, theme.dim);
+        assert_eq!(corner.fg, theme.text);
     }
 }

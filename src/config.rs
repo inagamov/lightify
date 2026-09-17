@@ -91,7 +91,7 @@ mod tests {
         std::fs::write(&path, "[theme]\naccent = \"blue\"\n").unwrap();
         let config = Config::load_from(&path).unwrap();
         assert_eq!(config.theme.accent, ratatui::style::Color::Blue);
-        assert_eq!(config.theme.dim, Theme::default().dim);
+        assert_eq!(config.theme.text, Theme::default().text);
     }
 
     #[test]

@@ -57,10 +57,10 @@ mod tests {
     }
 
     #[test]
-    fn playing_row_uses_playing_color_unless_selected() {
+    fn playing_row_uses_accent_unless_selected() {
         let theme = Theme {
-            playing: Color::Rgb(1, 1, 1),
-            selected_bg: Color::Rgb(2, 2, 2),
+            accent: Color::Rgb(180, 90, 0),
+            text: Color::Rgb(9, 9, 9),
             ..Theme::default()
         };
         let mut app = App::new().with_theme(theme.clone());
@@ -80,15 +80,15 @@ mod tests {
             .unwrap();
         let buffer = terminal.backend().buffer();
 
-        assert_eq!(buffer.cell((1, 1)).unwrap().bg, theme.selected_bg);
-        assert_eq!(buffer.cell((1, 2)).unwrap().fg, theme.playing);
+        assert_eq!(buffer.cell((1, 1)).unwrap().bg, theme.accent);
+        assert_eq!(buffer.cell((1, 2)).unwrap().fg, theme.accent);
 
         app.track_list.select(Some(1));
         terminal
             .draw(|frame| draw(frame, &mut app, frame.area()))
             .unwrap();
         let cell = terminal.backend().buffer().cell((1, 2)).unwrap();
-        assert_eq!(cell.bg, theme.selected_bg);
-        assert_eq!(cell.fg, theme.selected_fg);
+        assert_eq!(cell.bg, theme.accent);
+        assert_eq!(cell.fg, Color::Black);
     }
 }
