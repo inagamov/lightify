@@ -1,4 +1,6 @@
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::Line;
+use ratatui::widgets::{Block, BorderType};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -28,7 +30,6 @@ impl Theme {
         Style::new().fg(self.text).bg(self.background)
     }
 
-    /// The styles for one pane, resolved for whether it currently holds focus.
     pub fn pane(&self, focused: bool) -> Pane<'_> {
         Pane {
             theme: self,
@@ -36,8 +37,6 @@ impl Theme {
         }
     }
 
-    /// `text` at half strength, for content that should sit behind the line it
-    /// annotates: artist names, the progress gauge's trough.
     pub fn dim(&self) -> Style {
         self.faded(self.text)
     }
@@ -46,13 +45,6 @@ impl Theme {
         Style::new().fg(self.error)
     }
 
-    /// `color` mixed halfway into the background — as close to 50% opacity as a
-    /// terminal gets, since cells composite nothing and every color is opaque.
-    ///
-    /// Only an explicit `Color::Rgb` carries values to mix. ANSI names and
-    /// `Color::Reset` name slots in the terminal's palette, and guessing at what
-    /// those resolve to is how an accent ends up the wrong hue, so they get no
-    /// answer here.
     fn half(&self, color: Color) -> Option<Color> {
         let (Color::Rgb(r, g, b), Color::Rgb(br, bg, bb)) = (color, self.background) else {
             return None;
@@ -61,8 +53,6 @@ impl Theme {
         Some(Color::Rgb(mid(r, br), mid(g, bg), mid(b, bb)))
     }
 
-    /// `color` at half strength as a foreground, falling back to the terminal's
-    /// faint attribute when there is nothing to mix.
     fn faded(&self, color: Color) -> Style {
         match self.half(color) {
             Some(half) => Style::new().fg(half),
@@ -71,15 +61,20 @@ impl Theme {
     }
 }
 
-/// One pane's styles. A pane without focus renders at half strength, so the
-/// focused one is the only thing at full contrast.
 pub struct Pane<'a> {
     theme: &'a Theme,
     focused: bool,
 }
 
 impl Pane<'_> {
-    /// The pane's base style, which its rows inherit.
+    pub fn block(&self, title: impl Into<Line<'static>>) -> Block<'static> {
+        Block::bordered()
+            .border_type(BorderType::Rounded)
+            .title(title)
+            .title_style(self.title())
+            .border_style(self.border())
+    }
+
     pub fn text(&self) -> Style {
         self.at_strength(self.theme.text)
     }
@@ -96,9 +91,6 @@ impl Pane<'_> {
         self.at_strength(self.theme.accent)
     }
 
-    /// The selection bar. Halving it literally would fade the bar's text into
-    /// the bar itself — both are mixed toward the same background — so an
-    /// unfocused pane dims only the bar and keeps `text` on top of it.
     pub fn selected(&self) -> Style {
         if self.focused {
             return Style::new().fg(self.theme.background).bg(self.theme.accent);
@@ -186,7 +178,6 @@ mod tests {
         let theme = Theme::default();
         let pane = theme.pane(false);
 
-        // Black background, so half of each color is half of its channels.
         assert_eq!(pane.border().fg, Some(Color::Rgb(0x0e, 0x5c, 0x2a)));
         assert_eq!(pane.title().fg, Some(Color::Rgb(0x7f, 0x7f, 0x7f)));
         assert_eq!(pane.text().fg, Some(Color::Rgb(0x7f, 0x7f, 0x7f)));
@@ -212,7 +203,6 @@ mod tests {
         };
         let faded = theme.pane(false).text();
 
-        // Nothing to mix, so the color is left alone and the terminal fades it.
         assert_eq!(faded.fg, Some(Color::White));
         assert!(faded.add_modifier.contains(Modifier::DIM));
     }

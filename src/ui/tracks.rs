@@ -1,6 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::widgets::{Block, List, ListItem};
+use ratatui::widgets::{List, ListItem};
 
 use crate::app::{App, Focus};
 
@@ -25,12 +25,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let list = List::new(rows)
         .style(pane.text())
-        .block(
-            Block::bordered()
-                .title(title)
-                .title_style(pane.title())
-                .border_style(pane.border()),
-        )
+        .block(pane.block(title))
         .highlight_style(pane.selected());
 
     frame.render_stateful_widget(list, area, &mut app.track_list);
