@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, List, ListItem};
 use crate::app::{App, Focus};
 
 pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
-    let theme = &app.theme;
+    let pane = app.theme.pane(app.focus == Focus::Main);
 
     let title = match app.showing_playlist() {
         Some(playlist) => playlist.name.clone(),
@@ -17,20 +17,21 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
         let text = format!("{} {} {}", track.name, track.artist_names(), track.album);
         let item = ListItem::new(text);
         if playing == Some(track.uri.as_str()) {
-            item.style(app.theme.playing())
+            item.style(pane.playing())
         } else {
             item
         }
     });
 
     let list = List::new(rows)
+        .style(pane.text())
         .block(
             Block::bordered()
                 .title(title)
-                .title_style(theme.title())
-                .border_style(theme.border(app.focus == Focus::Main)),
+                .title_style(pane.title())
+                .border_style(pane.border()),
         )
-        .highlight_style(theme.selected());
+        .highlight_style(pane.selected());
 
     frame.render_stateful_widget(list, area, &mut app.track_list);
 }
@@ -64,6 +65,7 @@ mod tests {
             ..Theme::default()
         };
         let mut app = App::new().with_theme(theme.clone());
+        app.focus = Focus::Main;
         app.tracks = vec![track("a"), track("b")];
         app.track_list.select(Some(0));
         app.playback.track = Some(NowPlaying {
@@ -89,6 +91,6 @@ mod tests {
             .unwrap();
         let cell = terminal.backend().buffer().cell((1, 2)).unwrap();
         assert_eq!(cell.bg, theme.accent);
-        assert_eq!(cell.fg, Color::Black);
+        assert_eq!(cell.fg, theme.background);
     }
 }

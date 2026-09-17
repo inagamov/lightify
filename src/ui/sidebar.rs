@@ -5,15 +5,16 @@ use ratatui::widgets::{Block, List};
 use crate::app::{App, Focus};
 
 pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
-    let theme = &app.theme;
+    let pane = app.theme.pane(app.focus == Focus::Sidebar);
     let list = List::new(app.playlists.iter().map(|p| p.name.as_str()))
+        .style(pane.text())
         .block(
             Block::bordered()
                 .title("Playlists")
-                .title_style(theme.title())
-                .border_style(theme.border(app.focus == Focus::Sidebar)),
+                .title_style(pane.title())
+                .border_style(pane.border()),
         )
-        .highlight_style(theme.selected());
+        .highlight_style(pane.selected());
 
     frame.render_stateful_widget(list, area, &mut app.sidebar);
 }
@@ -36,10 +37,10 @@ mod tests {
     }
 
     #[test]
-    fn focused_border_uses_accent_and_unfocused_dims_text() {
+    fn the_border_halves_toward_the_background_when_unfocused() {
         let theme = Theme {
-            accent: Color::Rgb(1, 2, 3),
-            text: Color::Rgb(4, 5, 6),
+            accent: Color::Rgb(100, 200, 40),
+            background: Color::Rgb(0, 0, 0),
             ..Theme::default()
         };
 
@@ -52,6 +53,6 @@ mod tests {
         app.focus = Focus::Main;
         let terminal = render(&mut app);
         let corner = terminal.backend().buffer().cell((0, 0)).unwrap();
-        assert_eq!(corner.fg, theme.text);
+        assert_eq!(corner.fg, Color::Rgb(50, 100, 20));
     }
 }
