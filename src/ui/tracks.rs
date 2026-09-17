@@ -1,8 +1,9 @@
 use ratatui::Frame;
-use ratatui::layout::Rect;
-use ratatui::widgets::{List, ListItem};
+use ratatui::layout::{Constraint, Rect};
+use ratatui::widgets::{Cell, Row, Table};
 
 use crate::app::{App, Focus};
+use crate::ui::fmt_time;
 
 pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     let pane = app.theme.pane(app.focus == Focus::Main);
@@ -13,22 +14,39 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     };
 
     let playing = app.playing_uri();
-    let rows = app.tracks.iter().map(|track| {
-        let text = format!("{} {} {}", track.name, track.artist_names(), track.album);
-        let item = ListItem::new(text);
+    let rows = app.tracks.iter().enumerate().map(|(i, track)| {
+        let row = Row::new([
+            Cell::from((i + 1).to_string()),
+            Cell::from(track.name.clone()),
+            Cell::from(track.artist_names()),
+            Cell::from(track.album.clone()),
+            Cell::from(fmt_time(track.duration_ms)),
+        ]);
+
         if playing == Some(track.uri.as_str()) {
-            item.style(pane.playing())
+            row.style(pane.playing())
         } else {
-            item
+            row
         }
     });
 
-    let list = List::new(rows)
+    let widths = [
+        Constraint::Length(4),      // #
+        Constraint::Min(20),        // TITLE
+        Constraint::Percentage(25), // ARTIST
+        Constraint::Percentage(25), // ALBUM
+        Constraint::Length(5),      // TIME
+    ];
+
+    let header = Row::new(["#", "TITLE", "ARTIST", "ALBUM", "TIME"]).style(app.theme.dim());
+
+    let table = Table::new(rows, widths)
+        .header(header)
         .style(pane.text())
         .block(pane.block(title))
-        .highlight_style(pane.selected());
+        .row_highlight_style(pane.selected());
 
-    frame.render_stateful_widget(list, area, &mut app.track_list);
+    frame.render_stateful_widget(table, area, &mut app.track_list);
 }
 
 #[cfg(test)]
@@ -41,6 +59,8 @@ mod tests {
     use crate::app::NowPlaying;
     use crate::spotify::model::Track;
     use crate::theme::Theme;
+
+    const FIRST_ROW: u16 = 2;
 
     fn track(uri: &str) -> Track {
         Track {
@@ -77,14 +97,14 @@ mod tests {
             .unwrap();
         let buffer = terminal.backend().buffer();
 
-        assert_eq!(buffer.cell((1, 1)).unwrap().bg, theme.accent);
-        assert_eq!(buffer.cell((1, 2)).unwrap().fg, theme.accent);
+        assert_eq!(buffer.cell((1, FIRST_ROW)).unwrap().bg, theme.accent);
+        assert_eq!(buffer.cell((1, FIRST_ROW + 1)).unwrap().fg, theme.accent);
 
         app.track_list.select(Some(1));
         terminal
             .draw(|frame| draw(frame, &mut app, frame.area()))
             .unwrap();
-        let cell = terminal.backend().buffer().cell((1, 2)).unwrap();
+        let cell = terminal.backend().buffer().cell((1, FIRST_ROW + 1)).unwrap();
         assert_eq!(cell.bg, theme.accent);
         assert_eq!(cell.fg, theme.background);
     }

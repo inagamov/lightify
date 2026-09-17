@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use ratatui::widgets::ListState;
+use ratatui::widgets::{ListState, TableState};
 
 use crate::action::Action;
 use crate::message::Message;
@@ -8,6 +8,37 @@ use crate::spotify::library::PAGE_SIZE;
 use crate::spotify::model::{LibraryItem, Source, Track};
 use crate::spotify::player::{PlayerCommand, PlayerUpdate};
 use crate::theme::Theme;
+
+trait Selectable {
+    fn selected(&self) -> Option<usize>;
+    fn select(&mut self, index: Option<usize>);
+
+    fn move_by(&mut self, len: usize, delta: isize) {
+        if len == 0 {
+            return;
+        }
+        let current = self.selected().unwrap_or(0);
+        self.select(Some(current.saturating_add_signed(delta).min(len - 1)));
+    }
+}
+
+impl Selectable for ListState {
+    fn selected(&self) -> Option<usize> {
+        ListState::selected(self)
+    }
+    fn select(&mut self, index: Option<usize>) {
+        ListState::select(self, index);
+    }
+}
+
+impl Selectable for TableState {
+    fn selected(&self) -> Option<usize> {
+        TableState::selected(self)
+    }
+    fn select(&mut self, index: Option<usize>) {
+        TableState::select(self, index);
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -123,7 +154,7 @@ pub struct App {
     pub playlists: Vec<LibraryItem>,
     pub sidebar: ListState,
     pub tracks: Vec<Track>,
-    pub track_list: ListState,
+    pub track_list: TableState,
     pub tracks_for: Option<Source>,
     pub track_uris: Vec<String>,
     pub loading_more: bool,
@@ -141,7 +172,7 @@ impl App {
             playlists: Vec::new(),
             sidebar: ListState::default().with_selected(Some(0)),
             tracks: Vec::new(),
-            track_list: ListState::default(),
+            track_list: TableState::default(),
             tracks_for: None,
             track_uris: Vec::new(),
             loading_more: false,
@@ -190,22 +221,22 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
     match action {
         Action::MoveDown => {
             let (state, len) = focused_list(app);
-            move_selection(state, len, 1);
+            state.move_by(len, 1);
             load_more_if_near_end(app)
         }
         Action::MoveUp => {
             let (state, len) = focused_list(app);
-            move_selection(state, len, -1);
+            state.move_by(len, -1);
             load_more_if_near_end(app)
         }
         Action::GoTop => {
             let (state, len) = focused_list(app);
-            move_selection(state, len, isize::MIN);
+            state.move_by(len, isize::MIN);
             load_more_if_near_end(app)
         }
         Action::GoBottom => {
             let (state, len) = focused_list(app);
-            move_selection(state, len, isize::MAX);
+            state.move_by(len, isize::MAX);
             load_more_if_near_end(app)
         }
         Action::FocusSidebar => {
@@ -386,20 +417,11 @@ fn request_tracks(app: &mut App, source: Source) -> Vec<Effect> {
     vec![Effect::Api(LibraryRequest::PlaylistTracks { source })]
 }
 
-fn focused_list(app: &mut App) -> (&mut ListState, usize) {
+fn focused_list(app: &mut App) -> (&mut dyn Selectable, usize) {
     match app.focus {
         Focus::Sidebar => (&mut app.sidebar, app.playlists.len()),
         Focus::Main => (&mut app.track_list, app.tracks.len()),
     }
-}
-
-fn move_selection(state: &mut ListState, len: usize, delta: isize) {
-    if len == 0 {
-        return;
-    }
-    let current = state.selected().unwrap_or(0);
-    let target = current.saturating_add_signed(delta).min(len - 1);
-    state.select(Some(target));
 }
 
 const LOAD_MORE_MARGIN: usize = 10;

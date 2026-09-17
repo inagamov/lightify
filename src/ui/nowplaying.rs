@@ -6,6 +6,7 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::ui::fmt_time;
 
 pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let [title_area, gauge_area, volume_area] = Layout::vertical([
@@ -46,21 +47,4 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
 
     let percent = u32::from(playback.volume) * 100 / u32::from(u16::MAX);
     frame.render_widget(Paragraph::new(format!("vol {percent}%")), volume_area);
-}
-
-fn fmt_time(ms: u32) -> String {
-    let secs = ms / 1000;
-    format!("{}:{:02}", secs / 60, secs % 60)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fmt_time_pads_seconds() {
-        assert_eq!(fmt_time(0), "0:00");
-        assert_eq!(fmt_time(65_000), "1:05");
-        assert_eq!(fmt_time(3_600_000), "60:00");
-    }
 }
