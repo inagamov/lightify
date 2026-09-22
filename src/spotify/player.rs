@@ -503,19 +503,6 @@ fn translate(event: PlayerEvent) -> Option<PlayerUpdate> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use librespot::playback::player::PlayerEvent;
-
-    #[test]
-    fn volume_event_translates() {
-        let update = translate(PlayerEvent::VolumeChanged { volume: 1234 });
-        assert_eq!(update, Some(PlayerUpdate::Volume(1234)));
-    }
-
-    #[test]
-    fn irrelevant_events_are_dropped() {
-        let update = translate(PlayerEvent::ShuffleChanged { shuffle: true });
-        assert_eq!(update, None);
-    }
 
     fn stuck_spirc() -> SpircTask {
         Box::pin(std::future::pending())

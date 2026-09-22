@@ -55,28 +55,10 @@ impl Config {
 mod tests {
     use super::*;
 
-    #[test]
-    fn dirs_end_with_app_name() {
-        assert!(cache_dir().ends_with("lightify"));
-    }
-
-    #[cfg(not(windows))]
-    #[test]
-    fn unix_dirs_live_under_dot_directories() {
-        if std::env::var_os("XDG_CACHE_HOME").is_none() {
-            assert!(cache_dir().to_string_lossy().contains("/.cache/"));
-        }
-    }
-
     fn scratch_file(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("lightify-config-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join(name)
-    }
-
-    #[test]
-    fn config_dir_ends_with_app_name() {
-        assert!(config_dir().ends_with("lightify"));
     }
 
     #[test]

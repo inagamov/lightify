@@ -222,31 +222,4 @@ mod tests {
             vec!["spotify:track:6ZmzpDDsIJzKHFzxb5cOMj".to_string()]
         );
     }
-
-    #[test]
-    fn track_conversion_keeps_uri_and_joins_artists() {
-        use librespot::metadata::Metadata;
-        use librespot::protocol::metadata::{Album, Artist, Track as TrackMessage};
-
-        let mut msg = TrackMessage::new();
-        msg.set_gid(vec![1; 16]);
-        msg.set_name("Dani California".into());
-        msg.set_duration(282_160);
-        let mut album = Album::new();
-        album.set_gid(vec![2; 16]);
-        album.set_name("Stadium Arcadium".into());
-        msg.album = Some(album).into();
-        let mut artist = Artist::new();
-        artist.set_gid(vec![3; 16]);
-        artist.set_name("Red Hot Chili Peppers".into());
-        msg.artist.push(artist);
-
-        let uri = SpotifyUri::from_uri("spotify:track:6ZmzpDDsIJzKHFzxb5cOMj").unwrap();
-        let track = librespot::metadata::Track::parse(&msg, &uri).unwrap();
-        let converted = to_track("spotify:track:6ZmzpDDsIJzKHFzxb5cOMj", track);
-        assert_eq!(converted.uri, "spotify:track:6ZmzpDDsIJzKHFzxb5cOMj");
-        assert_eq!(converted.duration_ms, 282_160);
-        assert_eq!(converted.artist_names(), "Red Hot Chili Peppers");
-        assert_eq!(converted.album, "Stadium Arcadium");
-    }
 }

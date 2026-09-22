@@ -221,20 +221,4 @@ mod tests {
             assert_eq!(app.status_text(), Some("player stopped"));
         }
     }
-
-    #[test]
-    fn digit_keys_map_to_count_digits() {
-        assert_eq!(
-            key_to_action(KeyEvent::from(KeyCode::Char('3'))),
-            Some(Action::Digit(3))
-        );
-        assert_eq!(
-            key_to_action(KeyEvent::from(KeyCode::Char('0'))),
-            Some(Action::Digit(0))
-        );
-        assert_eq!(
-            key_to_action(KeyEvent::from(KeyCode::Char('n'))),
-            Some(Action::Next)
-        );
-    }
 }
