@@ -6,7 +6,7 @@ use crate::action::Action;
 use crate::message::Message;
 use crate::spotify::library::PAGE_SIZE;
 use crate::spotify::model::{LibraryItem, Source, Track};
-use crate::spotify::player::{PlayerCommand, PlayerUpdate};
+use crate::spotify::player::{DEFAULT_VOLUME, PlayerCommand, PlayerUpdate};
 use crate::theme::Theme;
 
 trait Selectable {
@@ -80,12 +80,23 @@ pub enum Effect {
     Player(PlayerCommand),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Playback {
     pub track: Option<NowPlaying>,
     position_ms: u32,
     position_at: Option<Instant>,
     pub volume: u16,
+}
+
+impl Default for Playback {
+    fn default() -> Self {
+        Self {
+            track: None,
+            position_ms: 0,
+            position_at: None,
+            volume: DEFAULT_VOLUME,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

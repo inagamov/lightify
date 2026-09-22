@@ -45,6 +45,7 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
         .gauge_style(app.theme.accent);
     frame.render_widget(gauge, gauge_area);
 
-    let percent = u32::from(playback.volume) * 100 / u32::from(u16::MAX);
+    let max = u32::from(u16::MAX);
+    let percent = (u32::from(playback.volume) * 100 + max / 2) / max;
     frame.render_widget(Paragraph::new(format!("vol {percent}%")), volume_area);
 }

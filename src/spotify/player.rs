@@ -106,6 +106,8 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const QUIT_TIMEOUT: Duration = Duration::from_secs(2);
 const SESSION_CHECK: Duration = Duration::from_secs(1);
 
+pub const DEFAULT_VOLUME: u16 = (u16::MAX as u32 * 69 / 100) as u16;
+
 type SpircTask = Pin<Box<dyn Future<Output = ()> + Send>>;
 type Attempt = Pin<Box<dyn Future<Output = Result<Connected, PlayerError>> + Send>>;
 
@@ -411,6 +413,7 @@ pub async fn start(
 
     let connect_config = ConnectConfig {
         name: "lightify".to_string(),
+        initial_volume: DEFAULT_VOLUME,
         ..ConnectConfig::default()
     };
 
