@@ -9,13 +9,15 @@ pub struct Theme {
     pub background: Color,
     pub text: Color,
     pub accent: Color,
+    pub surface: Color,
     pub error: Color,
 }
 
 const DEFAULT: Theme = Theme {
-    background: Color::Rgb(0x00, 0x00, 0x00),
-    text: Color::Rgb(0xff, 0xff, 0xff),
+    background: Color::Reset,
+    text: Color::Reset,
     accent: Color::Rgb(0x1d, 0xb9, 0x54),
+    surface: Color::Rgb(0x00, 0x00, 0x00),
     error: Color::Red,
 };
 
@@ -46,7 +48,7 @@ impl Theme {
     }
 
     fn half(&self, color: Color) -> Option<Color> {
-        let (Color::Rgb(r, g, b), Color::Rgb(br, bg, bb)) = (color, self.background) else {
+        let (Color::Rgb(r, g, b), Color::Rgb(br, bg, bb)) = (color, self.surface) else {
             return None;
         };
         let mid = |a: u8, b: u8| ((u16::from(a) + u16::from(b)) / 2) as u8;
@@ -93,7 +95,7 @@ impl Pane<'_> {
 
     pub fn selected(&self) -> Style {
         if self.focused {
-            return Style::new().fg(self.theme.background).bg(self.theme.accent);
+            return Style::new().fg(self.theme.surface).bg(self.theme.accent);
         }
         let bar = self
             .theme
