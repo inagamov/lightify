@@ -32,6 +32,12 @@ pub enum PlayerCommand {
     Seek(u32),
     SetVolume(u16),
     Reconnect,
+    Resume {
+        uris: Vec<String>,
+        track_uri: String,
+        position_ms: u32,
+        playing: bool,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -439,6 +445,21 @@ fn handle(spirc: &Spirc, command: PlayerCommand) -> Result<(), librespot::core::
             let options = LoadRequestOptions {
                 start_playing: true,
                 playing_track: Some(PlayingTrack::Index(start_index as u32)),
+                ..Default::default()
+            };
+            spirc.activate()?;
+            spirc.load(LoadRequest::from_tracks(uris, options))
+        }
+        PlayerCommand::Resume {
+            uris,
+            track_uri,
+            position_ms,
+            playing,
+        } => {
+            let options = LoadRequestOptions {
+                start_playing: playing,
+                seek_to: position_ms,
+                playing_track: Some(PlayingTrack::Uri(track_uri)),
                 ..Default::default()
             };
             spirc.activate()?;

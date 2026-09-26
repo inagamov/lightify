@@ -108,6 +108,12 @@ pub struct NowPlaying {
     pub uri: String,
 }
 
+pub struct Resume {
+    pub track_uri: String,
+    pub position_ms: u32,
+    pub playing: bool,
+}
+
 impl Playback {
     pub fn current_position_ms(&self) -> u32 {
         match self.position_at {
@@ -180,6 +186,8 @@ pub struct App {
     pub status: Option<Status>,
     pub playback: Playback,
     pub theme: Theme,
+    pub queue: Vec<String>,
+    pub resume: Option<Resume>,
 }
 
 impl App {
@@ -199,6 +207,8 @@ impl App {
             status: None,
             playback: Playback::default(),
             theme: Theme::default(),
+            queue: Vec::new(),
+            resume: None,
         }
     }
 
@@ -390,20 +400,42 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
             Vec::new()
         }
         Message::Player(update) => {
-            match update {
+            let effects = match update {
                 PlayerUpdate::Disconnected => {
+                    if let Some(track) = &app.playback.track {
+                        app.resume = Some(Resume {
+                            track_uri: track.uri.clone(),
+                            position_ms: app.playback.current_position_ms(),
+                            playing: app.playback.is_playing(),
+                        })
+                    }
                     app.library_generation += 1;
                     app.loading_more = false;
                     app.connection = ConnectionStatus::Reconnecting;
                     app.status = Some(Status::Error(
                         "connection dropped, reconnecting".to_string(),
                     ));
+                    Vec::new()
                 }
                 PlayerUpdate::Reconnected => {
                     app.connection = ConnectionStatus::Connected;
-                    app.status = Some(Status::Error(
-                        "reconnected, press enter on a track to play".to_string(),
-                    ));
+                    match app.resume.take() {
+                        Some(resume) => {
+                            app.status = Some(Status::Error("reconnected".to_string()));
+                            vec![Effect::Player(PlayerCommand::Resume {
+                                uris: app.queue.clone(),
+                                track_uri: resume.track_uri,
+                                position_ms: resume.position_ms,
+                                playing: resume.playing,
+                            })]
+                        }
+                        None => {
+                            app.status = Some(Status::Error(
+                                "reconnected, press enter on a track to play".to_string(),
+                            ));
+                            Vec::new()
+                        }
+                    }
                 }
                 PlayerUpdate::ConnectionLost(ref error) => {
                     app.connection = ConnectionStatus::Lost;
@@ -411,11 +443,12 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
                         Some(Status::Error(error.clone().unwrap_or_else(|| {
                             "connection lost, press R to reconnect".to_string()
                         })));
+                    Vec::new()
                 }
-                _ => {}
-            }
+                _ => Vec::new(),
+            };
             app.playback.apply(update);
-            Vec::new()
+            effects
         }
         Message::Tick => Vec::new(),
     }
@@ -444,11 +477,12 @@ fn select_playlist(app: &mut App) -> Vec<Effect> {
     request_tracks(app, id)
 }
 
-fn play_selected(app: &App) -> Vec<Effect> {
+fn play_selected(app: &mut App) -> Vec<Effect> {
     let Some(start_index) = app.track_list.selected() else {
         return Vec::new();
     };
     let uris = app.track_uris.clone();
+    app.queue = uris.clone();
     vec![Effect::Player(PlayerCommand::Load { uris, start_index })]
 }
 
