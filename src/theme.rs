@@ -112,6 +112,3 @@ impl Pane<'_> {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

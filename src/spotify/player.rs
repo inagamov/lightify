@@ -87,23 +87,16 @@ pub struct PlayerHandle {
 
 impl PlayerHandle {
     pub async fn shutdown(self) {
-        let PlayerHandle { commands, mut task } = self;
+        let PlayerHandle { commands, task } = self;
         drop(commands);
-        match timeout(Duration::from_secs(10), &mut task).await {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => tracing::error!("player task failed: {error}"),
-            Err(_) => {
-                tracing::warn!("player task did not stop in time");
-                task.abort();
-                let _ = task.await;
-            }
+        if let Err(error) = task.await {
+            tracing::error!("player task failed: {error}")
         }
     }
 }
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
-const QUIT_TIMEOUT: Duration = Duration::from_secs(2);
 const SESSION_CHECK: Duration = Duration::from_secs(1);
 
 pub const DEFAULT_VOLUME: u16 = (u16::MAX as u32 * 69 / 100) as u16;
@@ -183,21 +176,15 @@ impl Connection {
 
     async fn quit(self) {
         match self {
-            Connection::Up(Connected { spirc, task, .. }) => {
+            Connection::Up(Connected { spirc, .. }) => {
                 if let Err(error) = spirc.shutdown() {
                     tracing::error!("spirc shutdown failed: {error}");
                 }
-                if timeout(QUIT_TIMEOUT, task).await.is_err() {
-                    tracing::warn!("spirc did not shut down in time");
-                }
             }
-            Connection::Draining { task, deadline } => {
-                let deadline = deadline.min(time::Instant::now() + QUIT_TIMEOUT);
-                if timeout_at(deadline, task).await.is_err() {
-                    tracing::warn!("spirc cleanup did not finish in time");
-                }
-            }
-            Connection::Connecting { .. } | Connection::Waiting { .. } | Connection::Down => {}
+            Connection::Draining { .. }
+            | Connection::Connecting { .. }
+            | Connection::Waiting { .. }
+            | Connection::Down => {}
         }
     }
 }
@@ -497,52 +484,5 @@ fn translate(event: PlayerEvent) -> Option<PlayerUpdate> {
             })
         }
         _ => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn stuck_spirc() -> SpircTask {
-        Box::pin(std::future::pending())
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn quit_while_draining_is_bounded_by_quit_timeout() {
-        let connection = Connection::Draining {
-            task: stuck_spirc(),
-            deadline: time::Instant::now() + SHUTDOWN_TIMEOUT,
-        };
-
-        let started = tokio::time::Instant::now();
-        connection.quit().await;
-
-        assert_eq!(started.elapsed(), QUIT_TIMEOUT);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn quit_while_draining_returns_as_soon_as_cleanup_finishes() {
-        let connection = Connection::Draining {
-            task: Box::pin(async {}),
-            deadline: time::Instant::now() + SHUTDOWN_TIMEOUT,
-        };
-
-        let started = tokio::time::Instant::now();
-        connection.quit().await;
-
-        assert_eq!(started.elapsed(), Duration::ZERO);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn quit_while_waiting_does_not_wait_out_the_retry() {
-        let connection = Connection::Waiting {
-            until: time::Instant::now() + Duration::from_secs(60),
-        };
-
-        let started = tokio::time::Instant::now();
-        connection.quit().await;
-
-        assert_eq!(started.elapsed(), Duration::ZERO);
     }
 }

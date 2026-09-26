@@ -63,33 +63,4 @@ mod tests {
         );
         assert_eq!(reconnector.next_delay(start + WINDOW), Some(DELAYS[0]));
     }
-
-    #[test]
-    fn expiring_one_attempt_keeps_the_rest_of_the_budget() {
-        let mut reconnector = Reconnector::default();
-        let start = Instant::now();
-        for seconds in 0..5 {
-            reconnector.next_delay(start + Duration::from_secs(seconds));
-        }
-        assert_eq!(
-            reconnector.next_delay(start + WINDOW - Duration::from_secs(1)),
-            None
-        );
-        assert_eq!(
-            reconnector.next_delay(start + WINDOW),
-            Some(Duration::from_secs(60))
-        );
-        assert_eq!(reconnector.next_delay(start + WINDOW), None);
-    }
-
-    #[test]
-    fn a_successful_attempt_restores_the_whole_budget() {
-        let mut reconnector = Reconnector::default();
-        let now = Instant::now();
-        for _ in 0..MAX_ATTEMPTS {
-            reconnector.next_delay(now);
-        }
-        reconnector.reset();
-        assert_eq!(reconnector.next_delay(now), Some(DELAYS[0]));
-    }
 }

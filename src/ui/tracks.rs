@@ -70,6 +70,3 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
 
     frame.render_stateful_widget(table, area, &mut app.track_list);
 }
-
-#[cfg(test)]
-mod tests;

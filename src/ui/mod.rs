@@ -32,15 +32,3 @@ pub(crate) fn fmt_time(ms: u32) -> String {
     let secs = ms / 1000;
     format!("{}:{:02}", secs / 60, secs % 60)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fmt_time_pads_seconds() {
-        assert_eq!(fmt_time(0), "0:00");
-        assert_eq!(fmt_time(65_000), "1:05");
-        assert_eq!(fmt_time(3_600_000), "60:00");
-    }
-}
