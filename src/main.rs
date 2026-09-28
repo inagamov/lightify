@@ -6,11 +6,10 @@ mod spotify;
 mod theme;
 mod ui;
 
-use std::time::Duration;
-
-use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
 use ratatui::DefaultTerminal;
+use std::time::Duration;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::time::MissedTickBehavior;
 use tracing::Level;
@@ -22,7 +21,7 @@ use crate::spotify::library::Library;
 use crate::spotify::player::PlayerCommand;
 use crate::theme::Theme;
 use action::Action;
-use app::{App, Effect, Input, LibraryRequest, update};
+use app::{App, Effect, Input, LibraryRequest, Mode, update};
 use message::Message;
 
 #[tokio::main]
@@ -108,7 +107,7 @@ async fn run(
         let input = tokio::select! {
             maybe_event = events.next() => match maybe_event {
                 Some(Ok(Event::Key(key))) if key.kind == KeyEventKind::Press => {
-                    match key_to_action(key) {
+                    match key_to_action(key, app.mode()) {
                         Some(action) => Input::Action(action),
                         None => continue,
                     }
@@ -137,7 +136,14 @@ fn send_player_command(
     }
 }
 
-fn key_to_action(key: KeyEvent) -> Option<Action> {
+fn key_to_action(key: KeyEvent, mode: Mode) -> Option<Action> {
+    match mode {
+        Mode::Normal => normal_key(key),
+        Mode::Insert => insert_key(key),
+    }
+}
+
+fn normal_key(key: KeyEvent) -> Option<Action> {
     match key.code {
         KeyCode::Char(c) if c.is_ascii_digit() => Some(Action::Digit(c as u8 - b'0')),
         KeyCode::Char('j') | KeyCode::Down => Some(Action::MoveDown),
@@ -157,7 +163,25 @@ fn key_to_action(key: KeyEvent) -> Option<Action> {
         KeyCode::Char('+') => Some(Action::VolumeUp),
         KeyCode::Char('-') => Some(Action::VolumeDown),
         KeyCode::Char('R') => Some(Action::Refresh),
+        KeyCode::Char('s') => Some(Action::FocusSearch),
         KeyCode::Char('q') => Some(Action::Quit),
+        _ => None,
+    }
+}
+
+fn insert_key(key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Char(c)
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            Some(Action::InsertChar(c))
+        }
+        KeyCode::Backspace => Some(Action::DeleteChar),
+        KeyCode::Enter => Some(Action::Submit),
+        KeyCode::Esc => Some(Action::Cancel),
+
         _ => None,
     }
 }
@@ -196,4 +220,23 @@ fn spawn_api(
 
         let _ = tx.send(message);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insert_mode_types_letters_instead_of_running_actions() {
+        for c in ['q', 'j', 's', '1', ' '] {
+            let key = KeyEvent::from(KeyCode::Char(c));
+            assert_eq!(
+                key_to_action(key, Mode::Insert),
+                Some(Action::InsertChar(c))
+            );
+        }
+
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert_eq!(key_to_action(ctrl_c, Mode::Insert), None);
+    }
 }
