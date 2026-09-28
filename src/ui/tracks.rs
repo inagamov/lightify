@@ -4,6 +4,7 @@ use ratatui::text::Text;
 use ratatui::widgets::{Cell, Row, Table};
 
 use crate::app::{App, Focus};
+use crate::spotify::model::Source;
 use crate::ui::fmt_time;
 
 pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -16,9 +17,12 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
         None
     };
 
-    let title = match app.showing_playlist() {
-        Some(playlist) => playlist.name.clone(),
-        None => String::from("Tracks"),
+    let title = match &app.tracks_for {
+        Some(Source::Search(query)) => format!("Results: {query}"),
+        _ => match app.showing_playlist() {
+            Some(playlist) => playlist.name.clone(),
+            None => String::from("Tracks"),
+        },
     };
 
     let playing = app.playing_uri();

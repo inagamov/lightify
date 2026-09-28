@@ -91,15 +91,6 @@ impl Library {
     async fn search_tracks(&self, query: &str) -> Result<Vec<String>, librespot::core::Error> {
         let session = self.session.get();
         let context = session.spclient().get_context(&search_uri(query)).await?;
-
-        // TEMPORARY: which page does the filler come from? Removed in Task 3.
-        tracing::info!(
-            pages = context.pages.len(),
-            per_page = ?context.pages.iter().map(|page| page.tracks.len()).collect::<Vec<_>>(),
-            next = ?context.pages.iter().map(|page| page.next_page_url()).collect::<Vec<_>>(),
-            "search context"
-        );
-
         Ok(to_uris(&context))
     }
 

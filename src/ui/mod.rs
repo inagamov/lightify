@@ -5,12 +5,14 @@ use ratatui::widgets::Block;
 use crate::app::App;
 
 pub mod nowplaying;
+pub mod search;
 pub mod sidebar;
 pub mod status;
 pub mod tracks;
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
-    let [body, nowplaying_area, status_area] = Layout::vertical([
+    let [search_area, body, nowplaying_area, status_area] = Layout::vertical([
+        Constraint::Length(3),
         Constraint::Min(3),
         Constraint::Length(3),
         Constraint::Length(1),
@@ -22,6 +24,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let [sidebar_area, tracks_area] =
         Layout::horizontal([Constraint::Length(24), Constraint::Min(20)]).areas(body);
 
+    search::draw(frame, app, search_area);
     sidebar::draw(frame, app, sidebar_area);
     tracks::draw(frame, app, tracks_area);
     nowplaying::draw(frame, app, nowplaying_area);
