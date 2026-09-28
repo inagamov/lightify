@@ -77,6 +77,7 @@ impl Library {
                     .map(SpotifyUri::to_uri)
                     .collect()
             }
+            Source::Search(query) => self.search_tracks(query).await,
         }
     }
 
@@ -84,6 +85,21 @@ impl Library {
         let session = self.session.get();
         let uri = format!("spotify:user:{}:collection", session.username());
         let context = session.spclient().get_context(&uri).await?;
+        Ok(to_uris(&context))
+    }
+
+    async fn search_tracks(&self, query: &str) -> Result<Vec<String>, librespot::core::Error> {
+        let session = self.session.get();
+        let context = session.spclient().get_context(&search_uri(query)).await?;
+
+        // TEMPORARY: which page does the filler come from? Removed in Task 3.
+        tracing::info!(
+            pages = context.pages.len(),
+            per_page = ?context.pages.iter().map(|page| page.tracks.len()).collect::<Vec<_>>(),
+            next = ?context.pages.iter().map(|page| page.next_page_url()).collect::<Vec<_>>(),
+            "search context"
+        );
+
         Ok(to_uris(&context))
     }
 
@@ -153,6 +169,11 @@ fn to_uris(context: &Context) -> Vec<String> {
         .collect()
 }
 
+fn search_uri(query: &str) -> String {
+    let encoded: String = form_urlencoded::byte_serialize(query.as_bytes()).collect();
+    format!("spotify:search:{encoded}")
+}
+
 fn to_track(uri: &str, track: metadata::Track) -> Track {
     Track {
         uri: uri.to_string(),
@@ -165,5 +186,20 @@ fn to_track(uri: &str, track: metadata::Track) -> Track {
             .map(|artist| artist.name)
             .collect(),
         album: track.album.name,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::search_uri;
+
+    #[test]
+    fn search_uri_encodes_the_query() {
+        assert_eq!(search_uri("never gonna"), "spotify:search:never+gonna");
+        assert_eq!(
+            search_uri("c++ & ac/dc"),
+            "spotify:search:c%2B%2B+%26+ac%2Fdc"
+        );
+        assert_eq!(search_uri("café"), "spotify:search:caf%C3%A9");
     }
 }

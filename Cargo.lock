@@ -1967,6 +1967,7 @@ dependencies = [
  "anyhow",
  "crossterm 0.29.0",
  "dirs",
+ "form_urlencoded",
  "futures",
  "librespot",
  "librespot-oauth",
