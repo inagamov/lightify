@@ -2,8 +2,9 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::widgets::Block;
 
-use crate::app::App;
+use crate::app::{App, Focus};
 
+pub mod gradient;
 pub mod nowplaying;
 pub mod search;
 pub mod sidebar;
@@ -29,6 +30,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     tracks::draw(frame, app, tracks_area);
     nowplaying::draw(frame, app, nowplaying_area);
     status::draw(frame, app, status_area);
+
+    let buf = frame.buffer_mut();
+    gradient::pane(buf, &app.theme, search_area, app.focus == Focus::Search);
+    gradient::pane(buf, &app.theme, sidebar_area, app.focus == Focus::Sidebar);
+    gradient::pane(buf, &app.theme, tracks_area, app.focus == Focus::Main);
 }
 
 pub(crate) fn fmt_time(ms: u32) -> String {

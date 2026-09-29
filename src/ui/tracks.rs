@@ -1,11 +1,11 @@
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Rect};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::Text;
-use ratatui::widgets::{Cell, Row, Table};
+use ratatui::widgets::{Cell, HighlightSpacing, Row, Table};
 
 use crate::app::{App, Focus};
 use crate::spotify::model::Source;
-use crate::ui::fmt_time;
+use crate::ui::{fmt_time, gradient};
 
 pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     let focused = app.focus == Focus::Main;
@@ -66,11 +66,28 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     ])
     .style(app.theme.dim());
 
+    let block = pane.block(title);
+    let [_header_area, rows_area] =
+        Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(block.inner(area));
+
     let table = Table::new(rows, widths)
         .header(header)
         .style(pane.text())
-        .block(pane.block(title))
-        .row_highlight_style(pane.selected());
+        .block(block)
+        .highlight_symbol(" ")
+        .highlight_spacing(HighlightSpacing::Always);
 
     frame.render_stateful_widget(table, area, &mut app.track_list);
+
+    if let Some(index) = app.track_list.selected() {
+        let offset = app.track_list.offset();
+        gradient::selected_row(
+            frame.buffer_mut(),
+            &app.theme,
+            rows_area,
+            index,
+            offset,
+            focused,
+        );
+    }
 }

@@ -1,17 +1,21 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::text::Line;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use crate::app::{App, Focus};
 
-const PROMPT: &str = "> ";
+const PROMPT: &str = "› ";
 
 pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let focused = app.focus == Focus::Search;
     let pane = app.theme.pane(focused);
 
-    let line = Line::from(format!("{PROMPT}{}", app.search.as_str()));
+    let line = Line::from(vec![
+        Span::styled(PROMPT, Style::new().fg(app.theme.accent).bold()),
+        Span::raw(app.search.as_str()),
+    ]);
     let width = u16::try_from(line.width()).unwrap_or(u16::MAX);
 
     let bar = Paragraph::new(line)
