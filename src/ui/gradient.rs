@@ -1,6 +1,6 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::Span;
 
 use crate::theme::Theme;
@@ -18,7 +18,7 @@ fn lerp(from: Color, to: Color, t: f32) -> Color {
 }
 
 fn sweep(area: Rect, x: u16, y: u16) -> f32 {
-    let span = f32::from(area.width) + 2.0 * f32::from(area.height);
+    let span = f32::from(area.width - 1) + 2.0 * f32::from(area.height - 1);
     (f32::from(x - area.x) + 2.0 * f32::from(y - area.y)) / span
 }
 
