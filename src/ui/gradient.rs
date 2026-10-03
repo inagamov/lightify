@@ -7,6 +7,7 @@ use crate::theme::Theme;
 
 const STEPS: u16 = 10;
 const GLOW_FADE: f32 = 1.4; // ~70%
+const BAR_CELL: &str = "■";
 
 fn lerp(from: Color, to: Color, t: f32) -> Color {
     let t = t.clamp(0.0, 1.0);
@@ -87,38 +88,36 @@ pub fn selected_row(
     }
 }
 
-pub fn stepped_bar(buf: &mut Buffer, theme: &Theme, area: Rect, ratio: f64) {
-    let width = area.width;
-    if width == 0 {
-        return;
-    }
+fn bar_colors(theme: &Theme, ratio: f64, width: u16) -> impl Iterator<Item = Color> {
+    let Theme {
+        accent,
+        accent_deep,
+        shade,
+        idle,
+        ..
+    } = *theme;
     let filled = (ratio.clamp(0.0, 1.0) * f64::from(width)).round() as u16;
-    for i in 0..width {
-        let Some(cell) = buf.cell_mut((area.x + i, area.y)) else {
-            continue;
-        };
+    (0..width).map(move |i| {
         let step = (u32::from(i) * u32::from(STEPS) / u32::from(width)) as u16;
         let t = f32::from(step) / f32::from(STEPS - 1);
-        let color = if i < filled {
-            lerp(theme.accent, theme.accent_deep, t)
+        if i < filled {
+            lerp(accent, accent_deep, t)
         } else {
-            lerp(theme.shade, theme.idle, t)
-        };
-        cell.set_symbol("■").set_fg(color);
+            lerp(shade, idle, t)
+        }
+    })
+}
+
+pub fn stepped_bar(buf: &mut Buffer, theme: &Theme, area: Rect, ratio: f64) {
+    for (x, color) in (area.x..).zip(bar_colors(theme, ratio, area.width)) {
+        if let Some(cell) = buf.cell_mut((x, area.y)) {
+            cell.set_symbol(BAR_CELL).set_fg(color);
+        }
     }
 }
 
 pub fn meter(theme: &Theme, ratio: f64, width: u16) -> Vec<Span<'static>> {
-    let filled = (ratio.clamp(0.0, 1.0) * f64::from(width)).round() as u16;
-    (0..width)
-        .map(|i| {
-            let t = f32::from(i) / f32::from(width.saturating_sub(1).max(1));
-            let color = if i < filled {
-                lerp(theme.accent, theme.accent_deep, t)
-            } else {
-                theme.idle
-            };
-            Span::styled("■", Style::new().fg(color))
-        })
+    bar_colors(theme, ratio, width)
+        .map(|color| Span::styled(BAR_CELL, Style::new().fg(color)))
         .collect()
 }
