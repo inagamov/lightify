@@ -89,15 +89,10 @@ impl Pane<'_> {
             .border_type(BorderType::Rounded)
             .title(title)
             .title_style(self.title())
-            .border_style(self.border())
     }
 
     pub fn text(&self) -> Style {
         self.at_strength(self.theme.text)
-    }
-
-    pub fn border(&self) -> Style {
-        self.at_strength(self.theme.accent)
     }
 
     pub fn title(&self) -> Style {
