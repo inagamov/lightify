@@ -97,7 +97,7 @@ pub fn stepped_bar(buf: &mut Buffer, theme: &Theme, area: Rect, ratio: f64) {
         let Some(cell) = buf.cell_mut((area.x + i, area.y)) else {
             continue;
         };
-        let step = i * STEPS / width;
+        let step = (u32::from(i) * u32::from(STEPS) / u32::from(width)) as u16;
         let t = f32::from(step) / f32::from(STEPS - 1);
         let color = if i < filled {
             lerp(theme.accent, theme.accent_deep, t)
