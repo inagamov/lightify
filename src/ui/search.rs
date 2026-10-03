@@ -1,6 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
@@ -14,7 +14,12 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let pane = app.theme.pane(focused);
 
     let line = Line::from(vec![
-        Span::styled(PROMPT, Style::new().fg(app.theme.accent).bold()),
+        Span::styled(
+            PROMPT,
+            Style::new()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(app.search.as_str()),
     ]);
     let width = u16::try_from(line.width()).unwrap_or(u16::MAX);

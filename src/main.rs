@@ -181,7 +181,6 @@ fn insert_key(key: KeyEvent) -> Option<Action> {
         KeyCode::Backspace => Some(Action::DeleteChar),
         KeyCode::Enter => Some(Action::Submit),
         KeyCode::Esc => Some(Action::Cancel),
-
         _ => None,
     }
 }
