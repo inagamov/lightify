@@ -25,31 +25,27 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     ));
     volume.push(Span::styled(format!(" {percent:>3}% "), theme.dim()));
 
-    // The pane's title style is bold; only the track name should be.
-    let plain = theme.dim().remove_modifier(Modifier::BOLD);
     let title = match &playback.track {
         Some(track) => {
             let icon = if playback.is_playing() { "▶" } else { "⏸" };
             Line::from(vec![
+                Span::styled(format!("{icon} "), Style::new().fg(theme.accent)),
                 Span::styled(
-                    format!("{icon} "),
-                    Style::new()
-                        .fg(theme.accent)
-                        .remove_modifier(Modifier::BOLD),
+                    track.name.clone(),
+                    Style::new().fg(theme.text).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(track.name.clone(), Style::new().fg(theme.text)),
-                Span::styled(" · ", plain),
-                Span::styled(track.artists.join(", "), plain),
+                Span::raw(" · "),
+                Span::raw(track.artists.join(", ")),
             ])
         }
-        None => Line::from(Span::styled("nothing playing", plain)),
+        None => Line::from("nothing playing"),
     };
 
-    let block = theme.pane(false).block(title).title_top(
-        Line::from(volume)
-            .style(Style::new().remove_modifier(Modifier::BOLD))
-            .right_aligned(),
-    );
+    let block = theme
+        .pane(false)
+        .block(title)
+        .title_style(theme.dim())
+        .title_top(Line::from(volume).right_aligned());
     let inner = block.inner(area);
     frame.render_widget(block, area);
     gradient::border(frame.buffer_mut(), theme, area, playback.is_playing());
