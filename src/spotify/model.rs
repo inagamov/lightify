@@ -2,6 +2,7 @@
 pub enum Source {
     LikedSongs,
     Playlist(String),
+    Search(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

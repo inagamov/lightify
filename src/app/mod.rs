@@ -1,3 +1,5 @@
+mod text_input;
+
 use std::time::Instant;
 
 use ratatui::widgets::{ListState, TableState};
@@ -8,6 +10,8 @@ use crate::spotify::library::PAGE_SIZE;
 use crate::spotify::model::{LibraryItem, Source, Track};
 use crate::spotify::player::{DEFAULT_VOLUME, PlayerCommand, PlayerUpdate};
 use crate::theme::Theme;
+
+pub use text_input::TextInput;
 
 trait Selectable {
     fn selected(&self) -> Option<usize>;
@@ -49,8 +53,15 @@ impl Selectable for TableState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
+    Search,
     Sidebar,
     Main,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Normal,
+    Insert,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,7 +80,7 @@ pub enum Input {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LibraryRequest {
     Playlists,
-    PlaylistTracks { source: Source },
+    Tracks { source: Source },
     MoreTracks { source: Source, uris: Vec<String> },
 }
 
@@ -173,6 +184,8 @@ impl Playback {
 
 pub struct App {
     pub focus: Focus,
+    pub focus_before_search: Focus,
+    pub search: TextInput,
     pub pending_count: Option<usize>,
     pub connection: ConnectionStatus,
     pub library_generation: u64,
@@ -194,6 +207,8 @@ impl App {
     pub fn new() -> Self {
         Self {
             focus: Focus::Sidebar,
+            focus_before_search: Focus::Sidebar,
+            search: TextInput::default(),
             pending_count: None,
             connection: ConnectionStatus::Connected,
             library_generation: 0,
@@ -209,6 +224,13 @@ impl App {
             theme: Theme::default(),
             queue: Vec::new(),
             resume: None,
+        }
+    }
+
+    pub fn mode(&self) -> Mode {
+        match self.focus {
+            Focus::Search => Mode::Insert,
+            Focus::Sidebar | Focus::Main => Mode::Normal,
         }
     }
 
@@ -304,6 +326,7 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
         Action::Select => match app.focus {
             Focus::Sidebar => select_playlist(app),
             Focus::Main => play_selected(app),
+            Focus::Search => unreachable!("insert mode maps Enter to Submit"),
         },
         Action::PlayPause => vec![Effect::Player(PlayerCommand::PlayPause)],
         Action::Next => vec![Effect::Player(PlayerCommand::Next)],
@@ -339,6 +362,24 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
                 vec![Effect::Player(PlayerCommand::Reconnect)]
             }
         },
+        Action::FocusSearch => {
+            app.focus_before_search = app.focus;
+            app.focus = Focus::Search;
+            Vec::new()
+        }
+        Action::InsertChar(c) => {
+            app.search.push(c);
+            Vec::new()
+        }
+        Action::DeleteChar => {
+            app.search.pop();
+            Vec::new()
+        }
+        Action::Cancel => {
+            app.focus = app.focus_before_search;
+            Vec::new()
+        }
+        Action::Submit => submit_search(app),
         Action::Quit => vec![Effect::Quit],
         Action::Digit(_) => unreachable!("digits return early above"),
     }
@@ -477,6 +518,15 @@ fn select_playlist(app: &mut App) -> Vec<Effect> {
     request_tracks(app, id)
 }
 
+fn submit_search(app: &mut App) -> Vec<Effect> {
+    let query = app.search.as_str().trim().to_string();
+    if query.is_empty() || !library_available(app) {
+        return Vec::new();
+    }
+    app.focus = Focus::Main;
+    request_tracks(app, Source::Search(query))
+}
+
 fn play_selected(app: &mut App) -> Vec<Effect> {
     let Some(start_index) = app.track_list.selected() else {
         return Vec::new();
@@ -493,13 +543,14 @@ fn request_tracks(app: &mut App, source: Source) -> Vec<Effect> {
     app.tracks_for = Some(source.clone());
     app.loading_more = false;
 
-    vec![Effect::Api(LibraryRequest::PlaylistTracks { source })]
+    vec![Effect::Api(LibraryRequest::Tracks { source })]
 }
 
 fn focused_list(app: &mut App) -> (&mut dyn Selectable, usize) {
     match app.focus {
         Focus::Sidebar => (&mut app.sidebar, app.playlists.len()),
         Focus::Main => (&mut app.track_list, app.tracks.len()),
+        Focus::Search => unreachable!("insert mode never produces movement actions"),
     }
 }
 

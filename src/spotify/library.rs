@@ -57,10 +57,7 @@ impl Library {
         Ok(playlists)
     }
 
-    pub async fn playlist_tracks(
-        &self,
-        source: &Source,
-    ) -> Result<Vec<String>, librespot::core::Error> {
+    pub async fn track_uris(&self, source: &Source) -> Result<Vec<String>, librespot::core::Error> {
         let session = self.session.get();
         match source {
             Source::LikedSongs => self.liked_tracks().await,
@@ -77,13 +74,19 @@ impl Library {
                     .map(SpotifyUri::to_uri)
                     .collect()
             }
+            Source::Search(query) => self.context_uris(&search_uri(query)).await,
         }
     }
 
     async fn liked_tracks(&self) -> Result<Vec<String>, librespot::core::Error> {
         let session = self.session.get();
         let uri = format!("spotify:user:{}:collection", session.username());
-        let context = session.spclient().get_context(&uri).await?;
+        self.context_uris(&uri).await
+    }
+
+    async fn context_uris(&self, uri: &str) -> Result<Vec<String>, librespot::core::Error> {
+        let session = self.session.get();
+        let context = session.spclient().get_context(uri).await?;
         Ok(to_uris(&context))
     }
 
@@ -107,7 +110,7 @@ impl Library {
     }
 
     pub async fn first_page(&self, source: &Source) -> Result<TracksPage, librespot::core::Error> {
-        let uris = self.playlist_tracks(source).await?;
+        let uris = self.track_uris(source).await?;
         let first = uris.iter().take(PAGE_SIZE).cloned().collect::<Vec<_>>();
         let tracks = self.track_details(first).await?;
         Ok(TracksPage { uris, tracks })
@@ -153,6 +156,11 @@ fn to_uris(context: &Context) -> Vec<String> {
         .collect()
 }
 
+fn search_uri(query: &str) -> String {
+    let encoded: String = form_urlencoded::byte_serialize(query.as_bytes()).collect();
+    format!("spotify:search:{encoded}")
+}
+
 fn to_track(uri: &str, track: metadata::Track) -> Track {
     Track {
         uri: uri.to_string(),
@@ -165,5 +173,20 @@ fn to_track(uri: &str, track: metadata::Track) -> Track {
             .map(|artist| artist.name)
             .collect(),
         album: track.album.name,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::search_uri;
+
+    #[test]
+    fn search_uri_encodes_the_query() {
+        assert_eq!(search_uri("never gonna"), "spotify:search:never+gonna");
+        assert_eq!(
+            search_uri("c++ & ac/dc"),
+            "spotify:search:c%2B%2B+%26+ac%2Fdc"
+        );
+        assert_eq!(search_uri("café"), "spotify:search:caf%C3%A9");
     }
 }

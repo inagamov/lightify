@@ -17,4 +17,9 @@ pub enum Action {
     VolumeDown,
     Refresh,
     Quit,
+    FocusSearch,
+    InsertChar(char),
+    DeleteChar,
+    Submit,
+    Cancel,
 }
