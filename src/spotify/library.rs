@@ -77,20 +77,19 @@ impl Library {
                     .map(SpotifyUri::to_uri)
                     .collect()
             }
-            Source::Search(query) => self.search_tracks(query).await,
+            Source::Search(query) => self.context_uris(&search_uri(query)).await,
         }
     }
 
     async fn liked_tracks(&self) -> Result<Vec<String>, librespot::core::Error> {
         let session = self.session.get();
         let uri = format!("spotify:user:{}:collection", session.username());
-        let context = session.spclient().get_context(&uri).await?;
-        Ok(to_uris(&context))
+        self.context_uris(&uri).await
     }
 
-    async fn search_tracks(&self, query: &str) -> Result<Vec<String>, librespot::core::Error> {
+    async fn context_uris(&self, uri: &str) -> Result<Vec<String>, librespot::core::Error> {
         let session = self.session.get();
-        let context = session.spclient().get_context(&search_uri(query)).await?;
+        let context = session.spclient().get_context(uri).await?;
         Ok(to_uris(&context))
     }
 
