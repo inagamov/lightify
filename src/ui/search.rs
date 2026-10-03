@@ -23,10 +23,13 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
         Span::raw(app.search.as_str()),
     ]);
     let width = u16::try_from(line.width()).unwrap_or(u16::MAX);
+    let inner_width = area.width.saturating_sub(2);
+    let scroll_x = width.saturating_add(1).saturating_sub(inner_width);
 
     let bar = Paragraph::new(line)
         .style(pane.text())
-        .block(pane.block("Search"));
+        .block(pane.block("Search"))
+        .scroll((0, scroll_x));
     frame.render_widget(bar, area);
     gradient::border(frame.buffer_mut(), &app.theme, area, focused);
 
