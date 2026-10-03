@@ -57,7 +57,7 @@ impl Library {
         Ok(playlists)
     }
 
-    pub async fn playlist_tracks(
+    pub async fn track_uris(
         &self,
         source: &Source,
     ) -> Result<Vec<String>, librespot::core::Error> {
@@ -114,7 +114,7 @@ impl Library {
     }
 
     pub async fn first_page(&self, source: &Source) -> Result<TracksPage, librespot::core::Error> {
-        let uris = self.playlist_tracks(source).await?;
+        let uris = self.track_uris(source).await?;
         let first = uris.iter().take(PAGE_SIZE).cloned().collect::<Vec<_>>();
         let tracks = self.track_details(first).await?;
         Ok(TracksPage { uris, tracks })

@@ -77,7 +77,7 @@ pub enum Input {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LibraryRequest {
     Playlists,
-    PlaylistTracks { source: Source },
+    Tracks { source: Source },
     MoreTracks { source: Source, uris: Vec<String> },
 }
 
@@ -540,7 +540,7 @@ fn request_tracks(app: &mut App, source: Source) -> Vec<Effect> {
     app.tracks_for = Some(source.clone());
     app.loading_more = false;
 
-    vec![Effect::Api(LibraryRequest::PlaylistTracks { source })]
+    vec![Effect::Api(LibraryRequest::Tracks { source })]
 }
 
 fn focused_list(app: &mut App) -> (&mut dyn Selectable, usize) {

@@ -200,7 +200,7 @@ fn spawn_api(
                 generation,
                 result: library.my_playlists().await,
             },
-            LibraryRequest::PlaylistTracks { source } => {
+            LibraryRequest::Tracks { source } => {
                 let result = library.first_page(&source).await;
                 Message::Tracks {
                     generation,
