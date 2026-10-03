@@ -37,21 +37,27 @@ pub fn border(buf: &mut Buffer, theme: &Theme, area: Rect, lit: bool) {
     if area.width < 2 || area.height < 2 {
         return;
     }
-    for y in area.top()..area.bottom() {
-        for x in area.left()..area.right() {
-            let Some(cell) = buf.cell_mut((x, y)) else {
-                continue;
-            };
-            if !is_border(cell.symbol()) {
-                continue;
-            }
-            let color = if lit {
-                lerp(theme.accent, theme.accent_deep, sweep(area, x, y))
-            } else {
-                theme.idle
-            };
-            cell.set_fg(color);
+    let mut paint = |x: u16, y: u16| {
+        let Some(cell) = buf.cell_mut((x, y)) else {
+            return;
+        };
+        if !is_border(cell.symbol()) {
+            return;
         }
+        let color = if lit {
+            lerp(theme.accent, theme.accent_deep, sweep(area, x, y))
+        } else {
+            theme.idle
+        };
+        cell.set_fg(color);
+    };
+    for x in area.left()..area.right() {
+        paint(x, area.top());
+        paint(x, area.bottom() - 1);
+    }
+    for y in area.top() + 1..area.bottom() - 1 {
+        paint(area.left(), y);
+        paint(area.right() - 1, y);
     }
 }
 
