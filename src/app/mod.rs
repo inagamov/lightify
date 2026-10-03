@@ -303,6 +303,10 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
         }
         Action::MoveUp => {
             let (state, len) = focused_list(app);
+            if state.selected().unwrap_or(0) == 0 {
+                focus_search(app);
+                return Vec::new();
+            }
             state.move_by(len, -row_delta(count));
             load_more_if_near_end(app)
         }
@@ -367,8 +371,7 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
             }
         },
         Action::FocusSearch => {
-            app.focus_before_search = app.focus;
-            app.focus = Focus::Search;
+            focus_search(app);
             Vec::new()
         }
         Action::InsertChar(c) => {
@@ -548,6 +551,11 @@ fn request_tracks(app: &mut App, source: Source) -> Vec<Effect> {
     app.loading_more = false;
 
     vec![Effect::Api(LibraryRequest::Tracks { source })]
+}
+
+fn focus_search(app: &mut App) {
+    app.focus_before_search = app.focus;
+    app.focus = Focus::Search;
 }
 
 fn focused_list(app: &mut App) -> (&mut dyn Selectable, usize) {

@@ -164,3 +164,21 @@ fn normal_actions_are_ignored_while_searching() {
     }
     assert_eq!(app.focus, Focus::Search);
 }
+
+#[test]
+fn move_up_at_top_focuses_search() {
+    let mut app = app_with_tracks(3);
+    update(&mut app, Input::Action(Action::FocusMain));
+    update(&mut app, Input::Action(Action::GoBottom));
+
+    update(&mut app, Input::Action(Action::Digit(5)));
+    update(&mut app, Input::Action(Action::MoveUp));
+    assert_eq!(app.focus, Focus::Main);
+    assert_eq!(app.track_list.selected(), Some(0));
+
+    update(&mut app, Input::Action(Action::MoveUp));
+    assert_eq!(app.focus, Focus::Search);
+
+    update(&mut app, Input::Action(Action::Cancel));
+    assert_eq!(app.focus, Focus::Main);
+}
