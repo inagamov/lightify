@@ -72,15 +72,17 @@ pub fn selected_row(
         return;
     };
 
+    if !focused {
+        let row = Rect::new(rows.x, y, rows.width, 1);
+        buf.set_style(row, Style::new().bg(theme.shade));
+        return;
+    }
+
     for i in 0..rows.width {
         let Some(cell) = buf.cell_mut((rows.x + i, y)) else {
             continue;
         };
-        if !focused {
-            cell.set_bg(theme.shade);
-            continue;
-        }
-        let t = f32::from(i) / f32::from(rows.width.max(1));
+        let t = f32::from(i) / f32::from(rows.width);
         cell.set_bg(lerp(theme.glow, theme.shade, t * GLOW_FADE));
         if i == 0 {
             cell.set_symbol("▌").set_fg(theme.accent);

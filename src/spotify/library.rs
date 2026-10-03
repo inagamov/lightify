@@ -57,10 +57,7 @@ impl Library {
         Ok(playlists)
     }
 
-    pub async fn track_uris(
-        &self,
-        source: &Source,
-    ) -> Result<Vec<String>, librespot::core::Error> {
+    pub async fn track_uris(&self, source: &Source) -> Result<Vec<String>, librespot::core::Error> {
         let session = self.session.get();
         match source {
             Source::LikedSongs => self.liked_tracks().await,
