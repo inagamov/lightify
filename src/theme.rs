@@ -101,7 +101,14 @@ impl Pane<'_> {
     }
 
     pub fn title(&self) -> Style {
-        self.at_strength(self.theme.text)
+        if self.focused {
+            Style::new()
+                .fg(self.theme.accent)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            self.at_strength(self.theme.text)
+                .add_modifier(Modifier::BOLD)
+        }
     }
 
     pub fn playing(&self) -> Style {

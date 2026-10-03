@@ -31,22 +31,6 @@ pub fn pane(buf: &mut Buffer, theme: &Theme, area: Rect, focused: bool) {
         return;
     }
     border(buf, theme, area, focused);
-
-    for x in area.left()..area.right() {
-        let Some(cell) = buf.cell_mut((x, area.top())) else {
-            continue;
-        };
-        if is_border(cell.symbol()) {
-            continue;
-        }
-        if focused {
-            let t = f32::from(x - area.x) * 3.0 / f32::from(area.width);
-            cell.set_fg(lerp(theme.accent, theme.accent_deep, t));
-            cell.modifier.insert(Modifier::BOLD);
-        } else {
-            cell.set_fg(theme.muted);
-        }
-    }
 }
 
 pub fn border(buf: &mut Buffer, theme: &Theme, area: Rect, lit: bool) {
