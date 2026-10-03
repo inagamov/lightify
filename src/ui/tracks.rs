@@ -80,6 +80,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
         .highlight_spacing(HighlightSpacing::Always);
 
     frame.render_stateful_widget(table, area, &mut app.track_list);
+    gradient::border(frame.buffer_mut(), &app.theme, area, focused);
 
     if let Some(index) = app.track_list.selected() {
         let offset = app.track_list.offset();

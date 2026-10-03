@@ -26,13 +26,6 @@ fn is_border(symbol: &str) -> bool {
     matches!(symbol, "─" | "│" | "╭" | "╮" | "╰" | "╯")
 }
 
-pub fn pane(buf: &mut Buffer, theme: &Theme, area: Rect, focused: bool) {
-    if area.width < 2 || area.height < 2 {
-        return;
-    }
-    border(buf, theme, area, focused);
-}
-
 pub fn border(buf: &mut Buffer, theme: &Theme, area: Rect, lit: bool) {
     if area.width < 2 || area.height < 2 {
         return;

@@ -18,6 +18,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
         .highlight_spacing(HighlightSpacing::Always);
 
     frame.render_stateful_widget(list, area, &mut app.sidebar);
+    gradient::border(frame.buffer_mut(), &app.theme, area, focused);
 
     if let Some(index) = app.sidebar.selected() {
         let offset = app.sidebar.offset();

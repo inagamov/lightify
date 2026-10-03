@@ -5,6 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use crate::app::{App, Focus};
+use crate::ui::gradient;
 
 const PROMPT: &str = "› ";
 
@@ -22,6 +23,7 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
         .style(pane.text())
         .block(pane.block("Search"));
     frame.render_widget(bar, area);
+    gradient::border(frame.buffer_mut(), &app.theme, area, focused);
 
     if focused {
         let x = area
