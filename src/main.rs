@@ -6,23 +6,23 @@ mod spotify;
 mod theme;
 mod ui;
 
+use std::time::Duration;
+
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
 use ratatui::DefaultTerminal;
-use std::time::Duration;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::time::MissedTickBehavior;
 use tracing::Level;
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::prelude::*;
 
-use crate::app::Status;
+use crate::action::Action;
+use crate::app::{App, Effect, Input, LibraryRequest, Mode, Status, update};
+use crate::message::Message;
 use crate::spotify::library::Library;
 use crate::spotify::player::PlayerCommand;
 use crate::theme::Theme;
-use action::Action;
-use app::{App, Effect, Input, LibraryRequest, Mode, update};
-use message::Message;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

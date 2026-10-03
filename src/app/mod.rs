@@ -1,13 +1,16 @@
 mod text_input;
 
+use std::time::Instant;
+
+use ratatui::widgets::{ListState, TableState};
+
 use crate::action::Action;
 use crate::message::Message;
 use crate::spotify::library::PAGE_SIZE;
 use crate::spotify::model::{LibraryItem, Source, Track};
 use crate::spotify::player::{DEFAULT_VOLUME, PlayerCommand, PlayerUpdate};
 use crate::theme::Theme;
-use ratatui::widgets::{ListState, TableState};
-use std::time::Instant;
+
 pub use text_input::TextInput;
 
 trait Selectable {
