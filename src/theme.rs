@@ -10,6 +10,7 @@ pub struct Theme {
     pub text: Color,
     pub accent: Color,
     pub accent_deep: Color,
+    pub highlight: Color,
     pub glow: Color,
     pub shade: Color,
     pub idle: Color,
@@ -23,6 +24,7 @@ const DEFAULT: Theme = Theme {
     text: Color::Reset,
     accent: Color::Rgb(0x1e, 0xd7, 0x60),
     accent_deep: Color::Rgb(0x0a, 0x6e, 0x33),
+    highlight: Color::Rgb(0xff, 0xff, 0xff),
     glow: Color::Rgb(0x17, 0x4d, 0x2c),
     shade: Color::Rgb(0x18, 0x18, 0x18),
     idle: Color::Rgb(0x2a, 0x2a, 0x2a),
@@ -104,6 +106,10 @@ impl Pane<'_> {
 
     pub fn playing(&self) -> Style {
         self.at_strength(self.theme.accent)
+    }
+
+    pub fn highlight(&self) -> Style {
+        Style::new().fg(self.theme.highlight)
     }
 
     fn at_strength(&self, color: Color) -> Style {

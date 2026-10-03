@@ -44,6 +44,8 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
 
         if playing == Some(track.uri.as_str()) {
             row.style(pane.playing())
+        } else if selected == Some(i) {
+            row.style(pane.highlight())
         } else {
             row
         }
