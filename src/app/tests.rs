@@ -148,3 +148,37 @@ fn app_with_tracks(n: usize) -> App {
     );
     app
 }
+
+#[test]
+fn normal_actions_are_ignored_while_searching() {
+    let mut app = app_with_tracks(3);
+    update(&mut app, Input::Action(Action::FocusSearch));
+
+    for action in [
+        Action::Select,
+        Action::MoveDown,
+        Action::GoTop,
+        Action::FocusMain,
+    ] {
+        assert_eq!(update(&mut app, Input::Action(action)), Vec::new());
+    }
+    assert_eq!(app.focus, Focus::Search);
+}
+
+#[test]
+fn move_up_at_top_focuses_search() {
+    let mut app = app_with_tracks(3);
+    update(&mut app, Input::Action(Action::FocusMain));
+    update(&mut app, Input::Action(Action::GoBottom));
+
+    update(&mut app, Input::Action(Action::Digit(5)));
+    update(&mut app, Input::Action(Action::MoveUp));
+    assert_eq!(app.focus, Focus::Main);
+    assert_eq!(app.track_list.selected(), Some(0));
+
+    update(&mut app, Input::Action(Action::MoveUp));
+    assert_eq!(app.focus, Focus::Search);
+
+    update(&mut app, Input::Action(Action::Cancel));
+    assert_eq!(app.focus, Focus::Main);
+}

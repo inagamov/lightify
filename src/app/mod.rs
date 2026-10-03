@@ -283,6 +283,10 @@ pub fn update(app: &mut App, input: Input) -> Vec<Effect> {
 }
 
 pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
+    if app.mode() == Mode::Insert && !is_insert_action(&action) {
+        return Vec::new();
+    }
+
     let count = match action {
         Action::Digit(d) => {
             app.push_digit(d);
@@ -299,6 +303,10 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
         }
         Action::MoveUp => {
             let (state, len) = focused_list(app);
+            if state.selected().unwrap_or(0) == 0 {
+                focus_search(app);
+                return Vec::new();
+            }
             state.move_by(len, -row_delta(count));
             load_more_if_near_end(app)
         }
@@ -326,7 +334,7 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
         Action::Select => match app.focus {
             Focus::Sidebar => select_playlist(app),
             Focus::Main => play_selected(app),
-            Focus::Search => unreachable!("insert mode maps Enter to Submit"),
+            Focus::Search => unreachable!("insert mode drops Select at the top of update_action"),
         },
         Action::PlayPause => vec![Effect::Player(PlayerCommand::PlayPause)],
         Action::Next => vec![Effect::Player(PlayerCommand::Next)],
@@ -363,8 +371,7 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
             }
         },
         Action::FocusSearch => {
-            app.focus_before_search = app.focus;
-            app.focus = Focus::Search;
+            focus_search(app);
             Vec::new()
         }
         Action::InsertChar(c) => {
@@ -546,12 +553,24 @@ fn request_tracks(app: &mut App, source: Source) -> Vec<Effect> {
     vec![Effect::Api(LibraryRequest::Tracks { source })]
 }
 
+fn focus_search(app: &mut App) {
+    app.focus_before_search = app.focus;
+    app.focus = Focus::Search;
+}
+
 fn focused_list(app: &mut App) -> (&mut dyn Selectable, usize) {
     match app.focus {
         Focus::Sidebar => (&mut app.sidebar, app.playlists.len()),
         Focus::Main => (&mut app.track_list, app.tracks.len()),
-        Focus::Search => unreachable!("insert mode never produces movement actions"),
+        Focus::Search => unreachable!("insert mode drops movement actions in update_action"),
     }
+}
+
+fn is_insert_action(action: &Action) -> bool {
+    matches!(
+        action,
+        Action::InsertChar(_) | Action::DeleteChar | Action::Submit | Action::Cancel
+    )
 }
 
 fn row_delta(count: Option<usize>) -> isize {
