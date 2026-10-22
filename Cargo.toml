@@ -31,4 +31,5 @@ tokio = { version = "1.53.1", features = ["test-util"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSEvent", "NSResponder", "NSRunningApplication"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSDate", "NSObjCRuntime", "NSString", "NSRunLoop"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSDate", "NSDictionary", "NSObjCRuntime", "NSString", "NSRunLoop", "NSValue"] }
+objc2-media-player = { version = "0.3.2", default-features = false, features = ["std", "MPRemoteCommandCenter", "MPRemoteCommand", "MPNowPlayingInfoCenter"] }

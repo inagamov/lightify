@@ -1,6 +1,6 @@
 use librespot::core::Error;
 
-use crate::media::MediaKey;
+use crate::media::MediaEvent;
 use crate::spotify::library::TracksPage;
 use crate::spotify::model::{LibraryItem, Source, Track};
 use crate::spotify::player::PlayerUpdate;
@@ -22,6 +22,6 @@ pub enum Message {
         result: Result<Vec<Track>, Error>,
     },
     Player(PlayerUpdate),
-    MediaKey(MediaKey),
+    Media(MediaEvent),
     Tick,
 }

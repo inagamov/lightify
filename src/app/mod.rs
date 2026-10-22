@@ -5,7 +5,7 @@ use std::time::Instant;
 use ratatui::widgets::{ListState, TableState};
 
 use crate::action::Action;
-use crate::media::MediaKey;
+use crate::media::MediaEvent;
 use crate::message::Message;
 use crate::spotify::library::PAGE_SIZE;
 use crate::spotify::model::{LibraryItem, Source, Track};
@@ -502,16 +502,17 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
             effects
         }
         // handled here rather than as an Action, so media keys work in insert mode too
-        Message::MediaKey(key) => {
+        Message::Media(event) => {
             let playing = app.playback.is_playing();
-            let command = match key {
-                MediaKey::Toggle => PlayerCommand::PlayPause,
+            let command = match event {
+                MediaEvent::Toggle => PlayerCommand::PlayPause,
                 // the widget sends Play/Pause for a specific state; only toggle to reach it
-                MediaKey::Play if !playing => PlayerCommand::PlayPause,
-                MediaKey::Pause if playing => PlayerCommand::PlayPause,
-                MediaKey::Play | MediaKey::Pause => return Vec::new(),
-                MediaKey::Next => PlayerCommand::Next,
-                MediaKey::Previous => PlayerCommand::Prev,
+                MediaEvent::Play if !playing => PlayerCommand::PlayPause,
+                MediaEvent::Pause if playing => PlayerCommand::PlayPause,
+                MediaEvent::Play | MediaEvent::Pause => return Vec::new(),
+                MediaEvent::Next => PlayerCommand::Next,
+                MediaEvent::Previous => PlayerCommand::Prev,
+                MediaEvent::SetPosition { position_ms } => PlayerCommand::Seek(position_ms),
             };
             vec![Effect::Player(command)]
         }
