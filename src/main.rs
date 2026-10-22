@@ -6,10 +6,18 @@ mod spotify;
 mod theme;
 mod ui;
 
+#[cfg(target_os = "macos")]
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
+#[cfg(target_os = "macos")]
+use objc2::MainThreadMarker;
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSEventMask};
+#[cfg(target_os = "macos")]
+use objc2_foundation::{NSDate, NSDefaultRunLoopMode};
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::time::MissedTickBehavior;
@@ -24,8 +32,45 @@ use crate::spotify::library::Library;
 use crate::spotify::player::PlayerCommand;
 use crate::theme::Theme;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    // macOS delivers media keys through the Cocoa app event loop on the main thread,
+    // so the async program runs on its own thread.
+    let program = std::thread::spawn(|| tokio::runtime::Runtime::new()?.block_on(async_main()));
+
+    #[cfg(target_os = "macos")]
+    run_app_event_loop(&program);
+
+    match program.join() {
+        Ok(result) => result,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+
+/// Pumps the Cocoa event loop until `program` finishes.
+#[cfg(target_os = "macos")]
+fn run_app_event_loop<T>(program: &JoinHandle<T>) {
+    let mtm = MainThreadMarker::new().expect("main runs on the main thread");
+    let app = NSApplication::sharedApplication(mtm);
+    // no Dock icon or menu bar: lightify stays a terminal program
+    app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+    app.finishLaunching();
+
+    while !program.is_finished() {
+        // waits up to 100 ms for an event, servicing the run loop meanwhile
+        let until = NSDate::dateWithTimeIntervalSinceNow(0.1);
+        let event = app.nextEventMatchingMask_untilDate_inMode_dequeue(
+            NSEventMask::Any,
+            Some(&until),
+            unsafe { NSDefaultRunLoopMode },
+            true,
+        );
+        if let Some(event) = event {
+            app.sendEvent(&event);
+        }
+    }
+}
+
+async fn async_main() -> anyhow::Result<()> {
     let cache_dir = config::cache_dir();
     std::fs::create_dir_all(&cache_dir)?;
 
