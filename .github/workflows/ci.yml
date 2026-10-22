@@ -14,13 +14,19 @@ env:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS runs the media controls' Cocoa event loop, which Linux never compiles
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
 
-      # librespot links against ALSA (audio) and OpenSSL; pkg-config is how their -sys crates find them. Without this the build fails at link time.
+      # librespot links against ALSA (audio) and OpenSSL, and souvlaki against D-Bus (media controls); pkg-config is how their -sys crates find them. Without this the build fails at link time.
       - name: Install system libraries
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libssl-dev pkg-config
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libssl-dev libdbus-1-dev pkg-config
 
       - uses: dtolnay/rust-toolchain@stable
         with:
