@@ -101,7 +101,7 @@ async fn async_main() -> anyhow::Result<()> {
     let player =
         spotify::player::start(login.session.clone(), login.credentials, tx.clone()).await?;
 
-    let media = MediaSession::start(tx.clone());
+    let mut media = MediaSession::start(tx.clone());
 
     let mut terminal = ratatui::init();
     let library = Library::new(login.session.clone());
@@ -109,13 +109,15 @@ async fn async_main() -> anyhow::Result<()> {
         &mut terminal,
         library,
         player.commands.clone(),
-        media,
+        media.as_mut(),
         tx,
         rx,
         config.theme,
     )
     .await;
     ratatui::restore();
+    // after restore: on Linux, dropping the D-Bus controls waits on their thread
+    drop(media);
 
     player.shutdown().await;
     login.session.shutdown();
@@ -126,7 +128,7 @@ async fn run(
     terminal: &mut DefaultTerminal,
     library: Library,
     player: UnboundedSender<PlayerCommand>,
-    mut media: Option<MediaSession>,
+    mut media: Option<&mut MediaSession>,
     tx: UnboundedSender<Message>,
     mut rx: UnboundedReceiver<Message>,
     theme: Theme,
