@@ -182,3 +182,22 @@ fn move_up_at_top_focuses_search() {
     update(&mut app, Input::Action(Action::Cancel));
     assert_eq!(app.focus, Focus::Main);
 }
+
+fn media(key: MediaKey) -> Input {
+    Input::Message(Message::MediaKey(key))
+}
+
+#[test]
+fn media_play_and_pause_only_act_when_state_differs() {
+    let mut app = App::new();
+    let play_pause = vec![Effect::Player(PlayerCommand::PlayPause)];
+
+    update(&mut app, player(PlayerUpdate::Playing { position_ms: 0 }));
+    assert_eq!(update(&mut app, media(MediaKey::Play)), vec![]);
+    assert_eq!(update(&mut app, media(MediaKey::Pause)), play_pause);
+
+    update(&mut app, player(PlayerUpdate::Paused { position_ms: 0 }));
+    assert_eq!(update(&mut app, media(MediaKey::Pause)), vec![]);
+    assert_eq!(update(&mut app, media(MediaKey::Play)), play_pause);
+    assert_eq!(update(&mut app, media(MediaKey::Toggle)), play_pause);
+}

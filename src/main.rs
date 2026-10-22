@@ -1,6 +1,7 @@
 mod action;
 mod app;
 mod config;
+mod media;
 mod message;
 mod spotify;
 mod theme;
@@ -27,6 +28,7 @@ use tracing_subscriber::prelude::*;
 
 use crate::action::Action;
 use crate::app::{App, Effect, Input, LibraryRequest, Mode, Status, update};
+use crate::media::MediaSession;
 use crate::message::Message;
 use crate::spotify::library::Library;
 use crate::spotify::player::PlayerCommand;
@@ -99,12 +101,15 @@ async fn async_main() -> anyhow::Result<()> {
     let player =
         spotify::player::start(login.session.clone(), login.credentials, tx.clone()).await?;
 
+    let media = MediaSession::start(tx.clone());
+
     let mut terminal = ratatui::init();
     let library = Library::new(login.session.clone());
     let result = run(
         &mut terminal,
         library,
         player.commands.clone(),
+        media,
         tx,
         rx,
         config.theme,
@@ -121,6 +126,7 @@ async fn run(
     terminal: &mut DefaultTerminal,
     library: Library,
     player: UnboundedSender<PlayerCommand>,
+    mut media: Option<MediaSession>,
     tx: UnboundedSender<Message>,
     mut rx: UnboundedReceiver<Message>,
     theme: Theme,
@@ -161,7 +167,12 @@ async fn run(
                 Some(Err(error)) => return Err(error.into()),
                 None => return Ok(()),
             },
-            Some(message) = rx.recv() => Input::Message(message),
+            Some(message) = rx.recv() => {
+                if let (Some(media), Message::Player(update)) = (&mut media, &message) {
+                    media.apply(update);
+                }
+                Input::Message(message)
+            }
             _ = tick.tick(), if app.playback.is_playing() => Input::Message(Message::Tick),
         };
 
