@@ -1,0 +1,3 @@
+# `cargo run` on macOS goes through lightify.app; see macos/run-in-bundle.sh
+[target.'cfg(target_os = "macos")']
+runner = "macos/run-in-bundle.sh"
