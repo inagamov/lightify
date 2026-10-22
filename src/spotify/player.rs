@@ -69,6 +69,7 @@ pub enum PlayerUpdate {
         album: String,
         duration_ms: u32,
         uri: String,
+        cover_url: Option<String>,
     },
     Playing {
         position_ms: u32,
@@ -496,12 +497,19 @@ fn translate(event: PlayerEvent) -> Option<PlayerUpdate> {
                 ),
                 _ => (Vec::new(), String::new()),
             };
+            // the largest cover looks sharpest in Now Playing
+            let cover_url = item
+                .covers
+                .into_iter()
+                .max_by_key(|cover| cover.width)
+                .map(|cover| cover.url);
             Some(PlayerUpdate::TrackChanged {
                 name: item.name,
                 artists,
                 album,
                 duration_ms: item.duration_ms,
                 uri: item.uri,
+                cover_url,
             })
         }
         _ => None,

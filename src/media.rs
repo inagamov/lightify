@@ -62,6 +62,7 @@ impl MediaSession {
                 name,
                 artists,
                 album,
+                cover_url,
                 ..
             } => {
                 let artist = artists.join(", ");
@@ -69,6 +70,8 @@ impl MediaSession {
                     title: Some(name.as_str()),
                     artist: Some(artist.as_str()),
                     album: Some(album.as_str()),
+                    // macOS downloads it in the background, so it shows up a moment later
+                    cover_url: cover_url.as_deref(),
                     ..Default::default()
                 })
             }

@@ -145,6 +145,8 @@ impl Playback {
                 album,
                 duration_ms,
                 uri,
+                // the TUI doesn't draw covers
+                cover_url: _,
             } => {
                 self.track = Some(NowPlaying {
                     name,
