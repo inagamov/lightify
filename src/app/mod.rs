@@ -503,13 +503,10 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
         }
         // handled here rather than as an Action, so media keys work in insert mode too
         Message::Media(event) => {
-            let playing = app.playback.is_playing();
             let command = match event {
                 MediaEvent::Toggle => PlayerCommand::PlayPause,
-                // the widget sends Play/Pause for a specific state; only toggle to reach it
-                MediaEvent::Play if !playing => PlayerCommand::PlayPause,
-                MediaEvent::Pause if playing => PlayerCommand::PlayPause,
-                MediaEvent::Play | MediaEvent::Pause => return Vec::new(),
+                MediaEvent::Play => PlayerCommand::Play,
+                MediaEvent::Pause => PlayerCommand::Pause,
                 MediaEvent::Next => PlayerCommand::Next,
                 MediaEvent::Previous => PlayerCommand::Prev,
                 MediaEvent::SetPosition { position_ms } => PlayerCommand::Seek(position_ms),

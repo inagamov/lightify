@@ -27,6 +27,8 @@ pub enum PlayerCommand {
         start_index: usize,
     },
     PlayPause,
+    Play,
+    Pause,
     Next,
     Prev,
     Seek(u32),
@@ -467,6 +469,8 @@ fn handle(spirc: &Spirc, command: PlayerCommand) -> Result<(), librespot::core::
             spirc.load(LoadRequest::from_tracks(uris, options))
         }
         PlayerCommand::PlayPause => spirc.play_pause(),
+        PlayerCommand::Play => spirc.play(),
+        PlayerCommand::Pause => spirc.pause(),
         PlayerCommand::Next => spirc.next(),
         PlayerCommand::Prev => spirc.prev(),
         PlayerCommand::Seek(position_ms) => spirc.set_position_ms(position_ms),

@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS runs the media controls' Cocoa event loop, which Linux never compiles
+        # macOS-only code (the Cocoa event loop in main.rs, the Now Playing extras in media.rs) is cfg'd out on Linux, so only a macOS runner compiles and lints it
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:

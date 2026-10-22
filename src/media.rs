@@ -74,7 +74,11 @@ impl MediaSession {
         })
     }
 
-    /// Mirrors a player update in the OS widget, like `Playback::apply` does for the TUI.
+    /// Shows a player update in the OS media widget. Unlike `Playback::apply`, it keeps
+    /// the track on Stopped/Disconnected and clears it only on ConnectionLost.
+    ///
+    /// souvlaki's macOS backend never returns an error, so the warnings here only ever
+    /// fire on Linux (D-Bus).
     pub fn apply(&mut self, update: &PlayerUpdate) {
         let result = match update {
             PlayerUpdate::TrackChanged {
@@ -138,6 +142,7 @@ impl MediaSession {
     }
 
     fn clear(&mut self) {
+        self.playing = false;
         let result = self
             .controls
             .set_playback(MediaPlayback::Stopped)
