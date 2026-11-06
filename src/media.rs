@@ -35,6 +35,17 @@ impl MediaSession {
             return None;
         }
 
+        // macOS only publishes commands to other apps (Control Center, notch widgets)
+        // when they are registered on the main thread; play/pause slip through either way
+        let controls = on_main_thread(move || Self::register(tx))?;
+        Some(Self {
+            controls,
+            playing: false,
+        })
+    }
+
+    /// Creates the OS controls and attaches the handler that forwards their events.
+    fn register(tx: UnboundedSender<Message>) -> Option<MediaControls> {
         let config = PlatformConfig {
             dbus_name: "lightify",
             display_name: "lightify",
@@ -68,10 +79,7 @@ impl MediaSession {
         #[cfg(target_os = "macos")]
         macos::disable_unhandled_commands();
 
-        Some(Self {
-            controls,
-            playing: false,
-        })
+        Some(controls)
     }
 
     /// Shows a player update in the OS media widget. Unlike `Playback::apply`, it keeps
@@ -161,12 +169,33 @@ impl Drop for MediaSession {
 
 /// Now Playing details souvlaki leaves out, set the way Chromium does.
 #[cfg(target_os = "macos")]
+use macos::on_main_thread;
+
+#[cfg(not(target_os = "macos"))]
+fn on_main_thread<R>(work: impl FnOnce() -> R) -> R {
+    work()
+}
+
+#[cfg(target_os = "macos")]
 mod macos {
+    use dispatch2::DispatchQueue;
+    use objc2::MainThreadMarker;
     use objc2::runtime::AnyObject;
     use objc2_foundation::{NSMutableDictionary, NSNumber, NSString};
     use objc2_media_player::{
         MPNowPlayingInfoCenter, MPNowPlayingInfoPropertyPlaybackRate, MPRemoteCommandCenter,
     };
+
+    /// Runs `work` on the main thread and waits for it. `main` keeps the main thread
+    /// pumping its run loop, which serves the dispatch main queue.
+    pub fn on_main_thread<R: Send>(work: impl FnOnce() -> R + Send) -> R {
+        if MainThreadMarker::new().is_some() {
+            return work();
+        }
+        let mut result = None;
+        DispatchQueue::main().exec_sync(|| result = Some(work()));
+        result.expect("exec_sync runs the closure before returning")
+    }
 
     /// Turns off the commands lightify doesn't handle. They start out enabled with no
     /// handler, and then Control Center dims next/previous and freezes the progress bar.
