@@ -112,6 +112,9 @@ pub enum PlayerUpdate {
     },
     Volume(u16),
     Stopped,
+    Unavailable {
+        uri: String,
+    },
     Disconnected,
     Reconnected,
     ConnectionLost(Option<String>),
@@ -519,6 +522,10 @@ fn translate(event: PlayerEvent) -> Option<PlayerUpdate> {
         }
 
         PlayerEvent::Stopped { .. } | PlayerEvent::EndOfTrack { .. } => Some(PlayerUpdate::Stopped),
+
+        PlayerEvent::Unavailable { track_id, .. } => Some(PlayerUpdate::Unavailable {
+            uri: track_id.to_string(),
+        }),
 
         PlayerEvent::TrackChanged { audio_item } => {
             let item = *audio_item;

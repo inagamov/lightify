@@ -213,7 +213,9 @@ impl Playback {
                 self.position_ms = 0;
                 self.position_at = None;
             }
-            PlayerUpdate::Reconnected | PlayerUpdate::ConnectionLost(_) => {}
+            PlayerUpdate::Reconnected
+            | PlayerUpdate::ConnectionLost(_)
+            | PlayerUpdate::Unavailable { .. } => {}
         }
     }
 
@@ -549,6 +551,17 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
                             Vec::new()
                         }
                     }
+                }
+                PlayerUpdate::Unavailable { ref uri } => {
+                    let name = app
+                        .tracks
+                        .iter()
+                        .find(|track| &track.uri == uri)
+                        .map_or("this track", |track| track.name.as_str());
+                    app.status = Some(Status::Error(format!(
+                        "Spotify wouldn't play {name}, skipping it"
+                    )));
+                    Vec::new()
                 }
                 PlayerUpdate::ConnectionLost(ref error) => {
                     app.connection = ConnectionStatus::Lost;

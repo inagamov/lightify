@@ -194,3 +194,37 @@ fn help_swallows_other_actions_until_closed() {
         vec![Effect::Quit]
     );
 }
+
+#[test]
+fn unplayable_track_is_reported_by_name() {
+    let mut app = App::new();
+    app.tracks = vec![Track {
+        uri: "spotify:track:a".into(),
+        name: "Business".into(),
+        duration_ms: 1,
+        artists: vec![],
+        album: String::new(),
+    }];
+
+    update(
+        &mut app,
+        player(PlayerUpdate::Unavailable {
+            uri: "spotify:track:a".into(),
+        }),
+    );
+    assert_eq!(
+        app.status_text(),
+        Some("Spotify wouldn't play Business, skipping it")
+    );
+
+    update(
+        &mut app,
+        player(PlayerUpdate::Unavailable {
+            uri: "spotify:track:unknown".into(),
+        }),
+    );
+    assert_eq!(
+        app.status_text(),
+        Some("Spotify wouldn't play this track, skipping it")
+    );
+}
