@@ -501,7 +501,6 @@ fn translate(event: PlayerEvent) -> Option<PlayerUpdate> {
                 ),
                 _ => (Vec::new(), String::new()),
             };
-            // the largest cover looks sharpest in Now Playing
             let cover_url = item
                 .covers
                 .into_iter()

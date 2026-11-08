@@ -17,13 +17,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS-only code (the Cocoa event loop in main.rs, the Now Playing extras in media.rs) is cfg'd out on Linux, so only a macOS runner compiles and lints it
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
 
-      # librespot links against ALSA (audio) and OpenSSL, and souvlaki against D-Bus (media controls); pkg-config is how their -sys crates find them. Without this the build fails at link time.
       - name: Install system libraries
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libssl-dev libdbus-1-dev pkg-config
