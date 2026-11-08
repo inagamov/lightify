@@ -3,6 +3,8 @@ pub enum Action {
     Digit(u8),
     MoveDown,
     MoveUp,
+    HalfPageDown,
+    HalfPageUp,
     GoTop,
     GoBottom,
     FocusSidebar,

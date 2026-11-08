@@ -247,6 +247,12 @@ fn key_to_action(key: KeyEvent, mode: Mode) -> Option<Action> {
 
 fn normal_key(key: KeyEvent) -> Option<Action> {
     match key.code {
+        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::HalfPageDown)
+        }
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::HalfPageUp)
+        }
         KeyCode::Char(c) if c.is_ascii_digit() => Some(Action::Digit(c as u8 - b'0')),
         KeyCode::Char('j') | KeyCode::Down => Some(Action::MoveDown),
         KeyCode::Char('k') | KeyCode::Up => Some(Action::MoveUp),

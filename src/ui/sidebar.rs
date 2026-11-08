@@ -10,6 +10,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     let pane = app.theme.pane(focused);
     let block = pane.block("Playlists");
     let rows = block.inner(area);
+    app.sidebar_rows = usize::from(rows.height);
 
     let list = List::new(app.playlists.iter().map(|p| p.name.as_str()))
         .style(pane.text())
