@@ -5,6 +5,8 @@ use librespot::core::authentication::Credentials;
 use crate::spotify::oauth::SignInError;
 use crate::spotify::player::StartFailure;
 
+pub mod run;
+
 #[cfg(test)]
 mod tests;
 

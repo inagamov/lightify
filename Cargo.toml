@@ -5,12 +5,12 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
+base64 = "0.22"
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 dirs = "7.0.0"
 form_urlencoded = "1.2.2"
 futures = "0.3.34"
 librespot = "0.8.0"
-librespot-oauth = "0.8.0"
 oauth2 = { version = "5.0.0", default-features = false, features = ["reqwest-blocking"] }
 open = "5"
 protobuf = "3.7"

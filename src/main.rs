@@ -139,21 +139,29 @@ async fn async_main() -> anyhow::Result<()> {
 
     let config = config::Config::load()?;
 
-    let login = spotify::auth::login(&cache_dir).await?;
+    let cache = spotify::auth::open_cache(&cache_dir)?;
 
     let (tx, rx) = mpsc::unbounded_channel::<Message>();
 
-    let player =
-        spotify::player::start(login.session.clone(), login.credentials, tx.clone()).await?;
+    let mut terminal = ratatui::init();
+    let ready = match onboarding::run::run(&mut terminal, &config.theme, cache, tx.clone()).await {
+        Ok(Some(ready)) => ready,
+        Ok(None) => {
+            ratatui::restore();
+            return Ok(());
+        }
+        Err(error) => {
+            ratatui::restore();
+            return Err(error);
+        }
+    };
 
     let mut media = MediaSession::start(tx.clone());
-
-    let mut terminal = ratatui::init();
-    let library = Library::new(login.session.clone());
+    let library = Library::new(ready.session.clone());
     let result = run(
         &mut terminal,
         library,
-        player.commands.clone(),
+        ready.player.commands.clone(),
         media.as_mut(),
         tx,
         rx,
@@ -165,8 +173,8 @@ async fn async_main() -> anyhow::Result<()> {
     // after restore: on Linux, dropping the D-Bus controls waits on their thread
     drop(media);
 
-    player.shutdown().await;
-    login.session.shutdown();
+    ready.player.shutdown().await;
+    ready.session.shutdown();
     result
 }
 

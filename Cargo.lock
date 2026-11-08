@@ -2068,13 +2068,13 @@ name = "lightify"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "crossterm 0.29.0",
  "dirs",
  "dispatch2",
  "form_urlencoded",
  "futures",
  "librespot",
- "librespot-oauth",
  "oauth2",
  "objc2",
  "objc2-app-kit",
