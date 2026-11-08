@@ -5,6 +5,7 @@ use ratatui::widgets::Block;
 use crate::app::App;
 
 pub mod gradient;
+pub mod help;
 pub mod nowplaying;
 pub mod search;
 pub mod sidebar;
@@ -21,6 +22,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     .areas(frame.area());
 
     frame.render_widget(Block::new().style(app.theme.base()), frame.area());
+
+    if app.help_open {
+        let [help_area, status_area] =
+            Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(frame.area());
+        help::draw(frame, app, help_area);
+        status::draw(frame, app, status_area);
+        return;
+    }
 
     let [sidebar_area, tracks_area] =
         Layout::horizontal([Constraint::Length(24), Constraint::Min(20)]).areas(body);

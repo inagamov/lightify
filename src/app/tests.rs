@@ -181,3 +181,16 @@ fn move_up_at_top_stays_in_list() {
     assert_eq!(app.focus, Focus::Main);
     assert_eq!(app.track_list.selected(), Some(0));
 }
+
+#[test]
+fn help_swallows_other_actions_until_closed() {
+    let mut app = App::new();
+    update(&mut app, Input::Action(Action::ToggleHelp));
+    assert_eq!(app.mode(), Mode::Help);
+    assert_eq!(update(&mut app, Input::Action(Action::Quit)), vec![]);
+    update(&mut app, Input::Action(Action::ToggleHelp));
+    assert_eq!(
+        update(&mut app, Input::Action(Action::Quit)),
+        vec![Effect::Quit]
+    );
+}

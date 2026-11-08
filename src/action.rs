@@ -23,6 +23,7 @@ pub enum Action {
     Refresh,
     Quit,
     FocusSearch,
+    ToggleHelp,
     InsertChar(char),
     DeleteChar,
     Submit,

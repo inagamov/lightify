@@ -246,6 +246,14 @@ fn key_to_action(key: KeyEvent, mode: Mode, prefix: &mut Option<char>) -> Option
             None => normal_key(key, prefix),
         },
         Mode::Insert => insert_key(key),
+        Mode::Help => help_key(key),
+    }
+}
+
+fn help_key(key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Char('?' | 'q') | KeyCode::Esc => Some(Action::ToggleHelp),
+        _ => None,
     }
 }
 
@@ -288,6 +296,7 @@ fn normal_key(key: KeyEvent, prefix: &mut Option<char>) -> Option<Action> {
         KeyCode::Char('-') => Some(Action::VolumeDown),
         KeyCode::Char('R') => Some(Action::Refresh),
         KeyCode::Char('s') => Some(Action::FocusSearch),
+        KeyCode::Char('?') => Some(Action::ToggleHelp),
         KeyCode::Char('q') => Some(Action::Quit),
         _ => None,
     }

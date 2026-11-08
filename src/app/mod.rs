@@ -100,6 +100,7 @@ pub enum Focus {
 pub enum Mode {
     Normal,
     Insert,
+    Help,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -238,6 +239,7 @@ pub struct App {
     pub track_uris: Vec<String>,
     pub loading_more: bool,
     pub status: Option<Status>,
+    pub help_open: bool,
     pub playback: Playback,
     pub theme: Theme,
     pub queue: Vec<String>,
@@ -263,6 +265,7 @@ impl App {
             track_uris: Vec::new(),
             loading_more: false,
             status: None,
+            help_open: false,
             playback: Playback::default(),
             theme: Theme::default(),
             queue: Vec::new(),
@@ -271,6 +274,9 @@ impl App {
     }
 
     pub fn mode(&self) -> Mode {
+        if self.help_open {
+            return Mode::Help;
+        }
         match self.focus {
             Focus::Search => Mode::Insert,
             Focus::Sidebar | Focus::Main => Mode::Normal,
@@ -326,7 +332,7 @@ pub fn update(app: &mut App, input: Input) -> Vec<Effect> {
 }
 
 pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
-    if app.mode() == Mode::Insert && !is_insert_action(&action) {
+    if !is_allowed_in(app.mode(), &action) {
         return Vec::new();
     }
 
@@ -442,6 +448,10 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::Submit => submit_search(app),
+        Action::ToggleHelp => {
+            app.help_open = !app.help_open;
+            Vec::new()
+        }
         Action::Quit => vec![Effect::Quit],
         Action::Digit(_) => unreachable!("digits return early above"),
     }
@@ -659,11 +669,15 @@ fn half_page(count: Option<usize>, visible: usize) -> isize {
     row_delta(count.or(Some((visible / 2).max(1))))
 }
 
-fn is_insert_action(action: &Action) -> bool {
-    matches!(
-        action,
-        Action::InsertChar(_) | Action::DeleteChar | Action::Submit | Action::Cancel
-    )
+fn is_allowed_in(mode: Mode, action: &Action) -> bool {
+    match mode {
+        Mode::Normal => true,
+        Mode::Insert => matches!(
+            action,
+            Action::InsertChar(_) | Action::DeleteChar | Action::Submit | Action::Cancel
+        ),
+        Mode::Help => *action == Action::ToggleHelp,
+    }
 }
 
 fn row_delta(count: Option<usize>) -> isize {
