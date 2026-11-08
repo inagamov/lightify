@@ -1,6 +1,7 @@
 mod action;
 mod app;
 mod config;
+mod logo;
 mod media;
 mod message;
 mod onboarding;

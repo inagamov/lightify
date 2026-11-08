@@ -7,6 +7,7 @@ use crate::app::App;
 pub mod gradient;
 pub mod help;
 pub mod nowplaying;
+pub mod onboarding;
 pub mod search;
 pub mod sidebar;
 pub mod status;

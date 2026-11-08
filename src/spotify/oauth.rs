@@ -7,6 +7,8 @@ use oauth2::{
     PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse, TokenUrl,
 };
 use thiserror::Error;
+
+use crate::logo::LOGO;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -124,15 +126,6 @@ pub fn response(page: Option<Page>) -> String {
         body
     )
 }
-
-const LOGO: [&str; 6] = [
-    r" _ _       _     _   _  __",
-    r"| (_) __ _| |__ | |_(_)/ _|_   _",
-    r"| | |/ _` | '_ \| __| | |_| | | |",
-    r"| | | (_| | | | | |_| |  _| |_| |",
-    r"|_|_|\__, |_| |_|\__|_|_|  \__, |",
-    r"     |___/                 |___/",
-];
 
 fn escape(text: &str) -> String {
     text.replace('&', "&amp;")
