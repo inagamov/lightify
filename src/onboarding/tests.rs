@@ -33,7 +33,13 @@ fn first_run_waits_for_enter() {
     assert!(effects.is_empty());
 
     assert_eq!(key(&mut onboarding, Key::Enter), vec![Effect::StartSignIn]);
-    assert_eq!(onboarding.screen, Screen::Waiting { url: None });
+    assert_eq!(
+        onboarding.screen,
+        Screen::Waiting {
+            url: None,
+            copied_until: None
+        }
+    );
 
     let effects = update(&mut onboarding, Event::Listening { url: "u".into() });
     assert_eq!(effects, vec![Effect::OpenBrowser("u".into())]);
@@ -69,7 +75,13 @@ fn no_premium_signs_in_again() {
             }
         );
         assert_eq!(key(&mut onboarding, Key::Enter), vec![Effect::StartSignIn]);
-        assert_eq!(onboarding.screen, Screen::Waiting { url: None });
+        assert_eq!(
+            onboarding.screen,
+            Screen::Waiting {
+                url: None,
+                copied_until: None
+            }
+        );
     }
 }
 
@@ -120,5 +132,11 @@ fn cancelled_sign_in_retries_in_the_browser() {
     );
 
     assert_eq!(key(&mut onboarding, Key::Enter), vec![Effect::StartSignIn]);
-    assert_eq!(onboarding.screen, Screen::Waiting { url: None });
+    assert_eq!(
+        onboarding.screen,
+        Screen::Waiting {
+            url: None,
+            copied_until: None
+        }
+    );
 }

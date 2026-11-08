@@ -33,6 +33,7 @@ pub struct AuthRequest {
 pub enum Callback {
     Code(String),
     Denied,
+    Stale,
     NotLogin,
 }
 
@@ -41,6 +42,7 @@ pub enum Page {
     SignedIn,
     Cancelled,
     Failed,
+    Stale,
 }
 
 #[derive(Debug, Error)]
@@ -103,7 +105,7 @@ pub fn parse_callback(request_line: &str, expected_state: &str) -> Callback {
         }
     }
     if !state_matches {
-        return Callback::NotLogin;
+        return Callback::Stale;
     }
     if error {
         return Callback::Denied;
@@ -153,6 +155,12 @@ fn html(page: Page) -> String {
             "bad",
             "Something went wrong",
             "Head back to your terminal for details.",
+        ),
+        Page::Stale => (
+            "×",
+            "bad",
+            "This link is from an earlier sign-in",
+            "Head back to your terminal and open the newest link with o.",
         ),
     };
 
@@ -227,6 +235,10 @@ pub async fn sign_in(listener: TcpListener, request: AuthRequest) -> Result<Stri
 
         match parse_callback(&line, state.secret()) {
             Callback::NotLogin => respond(&mut stream, None).await,
+            Callback::Stale => {
+                tracing::warn!("ignored a sign-in redirect from an earlier attempt");
+                respond(&mut stream, Some(Page::Stale)).await;
+            }
             Callback::Denied => {
                 respond(&mut stream, Some(Page::Cancelled)).await;
                 return Err(SignInError::Cancelled);
@@ -333,13 +345,13 @@ mod tests {
     }
 
     #[test]
-    fn wrong_or_missing_state_is_ignored() {
+    fn wrong_or_missing_state_is_stale() {
         for line in [
             "GET /login?code=abc&state=y HTTP/1.1",
             "GET /login?code=abc HTTP/1.1",
             "GET /login?error=access_denied HTTP/1.1",
         ] {
-            assert_eq!(parse_callback(line, "x"), Callback::NotLogin, "{line}");
+            assert_eq!(parse_callback(line, "x"), Callback::Stale, "{line}");
         }
     }
 

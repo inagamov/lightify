@@ -11,6 +11,7 @@ use crate::ui::gradient;
 
 const CARD_WIDTH: u16 = 50;
 const PAD_LEFT: usize = 3;
+const MARK_WIDTH: usize = 2;
 const PAD_RIGHT: usize = 1;
 const TAGLINE: &str = "Spotify in your terminal, played right here.";
 const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -138,9 +139,10 @@ fn pad(line: impl Into<Line<'static>>) -> Line<'static> {
     line
 }
 
+/// spinner, ✓, ×
 fn hang(mark: Span<'static>, rest: impl Into<Line<'static>>) -> Line<'static> {
     let mut line = rest.into();
-    let gap = " ".repeat(PAD_LEFT.saturating_sub(2));
+    let gap = " ".repeat(PAD_LEFT.saturating_sub(MARK_WIDTH));
     line.spans
         .splice(0..0, [Span::raw(gap), mark, Span::raw(" ")]);
     line
@@ -173,7 +175,7 @@ fn body(onboarding: &Onboarding, theme: &Theme, width: usize) -> Vec<Line<'stati
             lines.push(Line::default());
             lines.push(pad(Line::styled("Playback needs Spotify Premium.", dim)));
         }
-        Screen::Waiting { url } => {
+        Screen::Waiting { url, .. } => {
             lines.push(hang(spinner, "Waiting for you to approve in the browser"));
             lines.push(Line::default());
             lines.push(pad(Line::styled(

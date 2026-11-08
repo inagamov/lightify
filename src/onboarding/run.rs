@@ -31,7 +31,8 @@ pub struct Ready {
 }
 
 enum Internal {
-    Event(Event),
+    SignIn { attempt: u64, event: Event },
+    Copied,
     Player(Result<PlayerHandle, PlayerError>),
 }
 
@@ -69,19 +70,29 @@ pub async fn run(
     let mut sign_in: Option<JoinHandle<()>> = None;
     let mut player: Option<PlayerHandle> = None;
     let mut attempts = 0usize;
+    let mut sign_in_attempt = 0u64;
 
     loop {
         for effect in pending.drain(..) {
             match effect {
                 Effect::StartSignIn => {
                     stop(&mut sign_in).await;
-                    sign_in = Some(spawn_sign_in(client_id.clone(), events_tx.clone()));
+                    sign_in_attempt += 1;
+                    sign_in = Some(spawn_sign_in(
+                        client_id.clone(),
+                        sign_in_attempt,
+                        events_tx.clone(),
+                    ));
                 }
                 Effect::CancelSignIn => stop(&mut sign_in).await,
                 Effect::OpenBrowser(url) => {
                     open::that_in_background(url);
                 }
-                Effect::CopyLink(url) => copy(&url),
+                Effect::CopyLink(url) => {
+                    if copy(&url) {
+                        let _ = events_tx.send(Internal::Copied);
+                    }
+                }
                 Effect::StartPlayer(credentials) => {
                     if attempts > 0 {
                         session.reconnect();
@@ -119,7 +130,9 @@ pub async fn run(
                 None => Event::Key(Key::Quit),
             },
             Some(internal) = events.recv() => match internal {
-                Internal::Event(event) => event,
+                Internal::SignIn { attempt, .. } if attempt != sign_in_attempt => continue,
+                Internal::SignIn { event, .. } => event,
+                Internal::Copied => Event::LinkCopied,
                 Internal::Player(Ok(handle)) => {
                     player = Some(handle);
                     Event::PlayerStarted(Ok(()))
@@ -136,6 +149,7 @@ pub async fn run(
     }
 }
 
+/// aborts sign-in task and waits until it's gone, so its listener has released the port
 async fn stop(task: &mut Option<JoinHandle<()>>) {
     if let Some(task) = task.take() {
         task.abort();
@@ -143,23 +157,31 @@ async fn stop(task: &mut Option<JoinHandle<()>>) {
     }
 }
 
-fn spawn_sign_in(client_id: String, events: UnboundedSender<Internal>) -> JoinHandle<()> {
+fn spawn_sign_in(
+    client_id: String,
+    attempt: u64,
+    events: UnboundedSender<Internal>,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         let result = async {
             let listener = oauth::listen().await?;
             let request = oauth::authorize(&client_id);
-            let _ = events.send(Internal::Event(Event::Listening {
-                url: request.url.clone(),
-            }));
+            let _ = events.send(Internal::SignIn {
+                attempt,
+                event: Event::Listening {
+                    url: request.url.clone(),
+                },
+            });
             oauth::sign_in(listener, request).await
         }
         .await;
         if let Err(error) = &result {
             tracing::warn!("sign-in failed: {error}");
         }
-        let _ = events.send(Internal::Event(Event::SignInFinished(
-            result.map(Credentials::with_access_token),
-        )));
+        let _ = events.send(Internal::SignIn {
+            attempt,
+            event: Event::SignInFinished(result.map(Credentials::with_access_token)),
+        });
     })
 }
 
@@ -170,19 +192,30 @@ fn spawn_player(
     events: UnboundedSender<Internal>,
 ) {
     tokio::spawn(async move {
-        let result = player::start(session, credentials, tx).await;
+        let result = tokio::spawn(player::start(session, credentials, tx))
+            .await
+            .unwrap_or_else(|join| Err(PlayerError::Crashed(join.to_string())));
         let _ = events.send(Internal::Player(result));
     });
 }
 
-fn copy(text: &str) {
-    if cfg!(target_os = "macos") && copy_with_pbcopy(text).is_ok() {
-        return;
+/// copies through pbcopy on macOS, otherwise asks the terminal to via OSC 52
+/// returns whether the copy went out
+/// a terminal that ignores OSC 52 can't be detected
+fn copy(text: &str) -> bool {
+    if cfg!(target_os = "macos") {
+        match copy_with_pbcopy(text) {
+            Ok(()) => return true,
+            Err(error) => tracing::warn!("pbcopy failed, trying the terminal: {error}"),
+        }
     }
     let encoded = base64::engine::general_purpose::STANDARD.encode(text);
     let mut stdout = std::io::stdout();
-    let _ = write!(stdout, "\x1b]52;c;{encoded}\x07");
-    let _ = stdout.flush();
+    let result = write!(stdout, "\x1b]52;c;{encoded}\x07").and_then(|()| stdout.flush());
+    if let Err(error) = &result {
+        tracing::warn!("could not copy the link: {error}");
+    }
+    result.is_ok()
 }
 
 fn copy_with_pbcopy(text: &str) -> std::io::Result<()> {
@@ -196,7 +229,12 @@ fn copy_with_pbcopy(text: &str) -> std::io::Result<()> {
     if let Some(stdin) = child.stdin.as_mut() {
         stdin.write_all(text.as_bytes())?;
     }
-    child.wait()?;
+    let status = child.wait()?;
+    if !status.success() {
+        return Err(std::io::Error::other(format!(
+            "pbcopy exited with {status}"
+        )));
+    }
     Ok(())
 }
 

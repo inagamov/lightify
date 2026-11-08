@@ -61,6 +61,9 @@ pub enum PlayerError {
 
     #[error("connection attempt timed out")]
     Timeout,
+
+    #[error("the player stopped unexpectedly: {0}")]
+    Crashed(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -444,14 +447,18 @@ pub async fn start(
         ..ConnectConfig::default()
     };
 
-    let connected = connect(
-        connect_config.clone(),
-        current,
-        credentials,
-        player.clone(),
-        mixer.clone(),
+    let connected = timeout(
+        CONNECT_TIMEOUT,
+        connect(
+            connect_config.clone(),
+            current,
+            credentials,
+            player.clone(),
+            mixer.clone(),
+        ),
     )
-    .await?;
+    .await
+    .unwrap_or(Err(PlayerError::Timeout))?;
 
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<PlayerCommand>();
     let task = tokio::spawn(

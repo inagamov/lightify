@@ -17,10 +17,20 @@ pub const COPIED_FOR: Duration = Duration::from_secs(2);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Screen {
     Connecting,
-    Welcome { note: Option<Note> },
-    Waiting { url: Option<String> },
-    SignedIn { since: Instant, ready: bool },
-    Failed { failure: Failure },
+    Welcome {
+        note: Option<Note>,
+    },
+    Waiting {
+        url: Option<String>,
+        copied_until: Option<Instant>,
+    },
+    SignedIn {
+        since: Instant,
+        ready: bool,
+    },
+    Failed {
+        failure: Failure,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +59,7 @@ pub enum Key {
 pub enum Event {
     Key(Key),
     Listening { url: String },
+    LinkCopied,
     SignInFinished(Result<Credentials, SignInError>),
     PlayerStarted(Result<(), StartFailure>),
     Tick(Instant),
@@ -76,7 +87,6 @@ pub struct Onboarding {
     pub screen: Screen,
     pub first_run: bool,
     pub spinner: usize,
-    copied_until: Option<Instant>,
     retry: Retry,
     last_tick: Instant,
 }
@@ -90,7 +100,6 @@ impl Onboarding {
                     screen: Screen::Connecting,
                     first_run: false,
                     spinner: 0,
-                    copied_until: None,
                     retry: Retry::Connect(credentials.clone()),
                     last_tick,
                 },
@@ -101,7 +110,6 @@ impl Onboarding {
                     screen: Screen::Welcome { note: None },
                     first_run: true,
                     spinner: 0,
-                    copied_until: None,
                     retry: Retry::SignIn,
                     last_tick,
                 },
@@ -122,7 +130,13 @@ impl Onboarding {
     }
 
     pub fn copied(&self) -> bool {
-        self.copied_until.is_some()
+        matches!(
+            self.screen,
+            Screen::Waiting {
+                copied_until: Some(_),
+                ..
+            }
+        )
     }
 
     fn fail(&mut self, failure: Failure) {
@@ -135,19 +149,27 @@ pub fn update(onboarding: &mut Onboarding, event: Event) -> Vec<Effect> {
         Event::Key(Key::Quit) => vec![Effect::CancelSignIn, Effect::Quit],
         Event::Key(key) => on_key(onboarding, key),
         Event::Listening { url } => match &mut onboarding.screen {
-            Screen::Waiting { url: shown } => {
+            Screen::Waiting { url: shown, .. } => {
                 *shown = Some(url.clone());
                 vec![Effect::OpenBrowser(url)]
             }
             _ => Vec::new(),
         },
+        Event::LinkCopied => {
+            if let Screen::Waiting { copied_until, .. } = &mut onboarding.screen {
+                *copied_until = Some(onboarding.last_tick + COPIED_FOR);
+            }
+            Vec::new()
+        }
         Event::SignInFinished(result) => on_sign_in(onboarding, result),
         Event::PlayerStarted(result) => on_player(onboarding, result),
         Event::Tick(now) => {
             onboarding.spinner = onboarding.spinner.wrapping_add(1);
             onboarding.last_tick = now;
-            if onboarding.copied_until.is_some_and(|until| now >= until) {
-                onboarding.copied_until = None;
+            if let Screen::Waiting { copied_until, .. } = &mut onboarding.screen
+                && copied_until.is_some_and(|until| now >= until)
+            {
+                *copied_until = None;
             }
             match onboarding.screen {
                 Screen::SignedIn { since, ready: true }
@@ -164,12 +186,10 @@ pub fn update(onboarding: &mut Onboarding, event: Event) -> Vec<Effect> {
 fn on_key(onboarding: &mut Onboarding, key: Key) -> Vec<Effect> {
     match (&onboarding.screen, key) {
         (Screen::Welcome { .. }, Key::Enter) => start_sign_in(onboarding),
-        (Screen::Waiting { url: Some(url) }, Key::Copy) => {
-            let effects = vec![Effect::CopyLink(url.clone())];
-            onboarding.copied_until = Some(onboarding.last_tick + COPIED_FOR);
-            effects
+        (Screen::Waiting { url: Some(url), .. }, Key::Copy) => vec![Effect::CopyLink(url.clone())],
+        (Screen::Waiting { url: Some(url), .. }, Key::Open) => {
+            vec![Effect::OpenBrowser(url.clone())]
         }
-        (Screen::Waiting { url: Some(url) }, Key::Open) => vec![Effect::OpenBrowser(url.clone())],
         (Screen::Waiting { .. }, Key::Back) => {
             onboarding.screen = Screen::Welcome { note: None };
             vec![Effect::CancelSignIn]
@@ -193,7 +213,10 @@ fn on_key(onboarding: &mut Onboarding, key: Key) -> Vec<Effect> {
 }
 
 fn start_sign_in(onboarding: &mut Onboarding) -> Vec<Effect> {
-    onboarding.screen = Screen::Waiting { url: None };
+    onboarding.screen = Screen::Waiting {
+        url: None,
+        copied_until: None,
+    };
     vec![Effect::StartSignIn]
 }
 
