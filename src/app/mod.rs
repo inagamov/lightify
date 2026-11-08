@@ -305,10 +305,6 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
         }
         Action::MoveUp => {
             let (state, len) = focused_list(app);
-            if state.selected().unwrap_or(0) == 0 {
-                focus_search(app);
-                return Vec::new();
-            }
             state.move_by(len, -row_delta(count));
             load_more_if_near_end(app)
         }
