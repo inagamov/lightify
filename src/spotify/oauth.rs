@@ -1,0 +1,318 @@
+use std::io::ErrorKind;
+use std::time::Duration;
+
+use oauth2::basic::BasicClient;
+use oauth2::{
+    AuthUrl, AuthorizationCode, ClientId, CsrfToken, EndpointNotSet, EndpointSet,
+    PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse, TokenUrl,
+};
+use thiserror::Error;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::{TcpListener, TcpStream};
+
+pub const REDIRECT_URI: &str = "http://127.0.0.1:8898/login";
+const LISTEN_ADDR: &str = "127.0.0.1:8898";
+const SCOPES: &[&str] = &["streaming"];
+const AUTH_URL: &str = "https://accounts.spotify.com/authorize";
+const TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
+const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(10);
+
+type Client = BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
+
+pub struct AuthRequest {
+    pub url: String,
+    verifier: PkceCodeVerifier,
+    client_id: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Callback {
+    Code(String),
+    Denied,
+    NotLogin,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Page {
+    SignedIn,
+    Cancelled,
+    Failed,
+}
+
+#[derive(Debug, Error)]
+pub enum SignInError {
+    #[error("port 8898 is busy")]
+    PortBusy,
+
+    #[error("sign-in was cancelled")]
+    Cancelled,
+
+    #[error("{0}")]
+    Exchange(String),
+
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
+
+fn client(client_id: &str) -> Client {
+    BasicClient::new(ClientId::new(client_id.to_string()))
+        .set_auth_uri(AuthUrl::new(AUTH_URL.to_string()).expect("valid auth url"))
+        .set_token_uri(TokenUrl::new(TOKEN_URL.to_string()).expect("valid token url"))
+        .set_redirect_uri(RedirectUrl::new(REDIRECT_URI.to_string()).expect("valid redirect uri"))
+}
+
+pub fn authorize(client_id: &str) -> AuthRequest {
+    let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
+    let (url, _csrf) = client(client_id)
+        .authorize_url(CsrfToken::new_random)
+        .add_scopes(SCOPES.iter().map(|s| Scope::new((*s).to_string())))
+        .set_pkce_challenge(challenge)
+        .add_extra_param("show_dialog", "true")
+        .url();
+
+    AuthRequest {
+        url: url.to_string(),
+        verifier,
+        client_id: client_id.to_string(),
+    }
+}
+
+pub fn parse_callback(request_line: &str) -> Callback {
+    let Some(target) = request_line.split_whitespace().nth(1) else {
+        return Callback::NotLogin;
+    };
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    if path != "/login" {
+        return Callback::NotLogin;
+    }
+
+    let mut code = None;
+    for (key, value) in form_urlencoded::parse(query.as_bytes()) {
+        match key.as_ref() {
+            "error" => return Callback::Denied,
+            "code" => code = Some(value.into_owned()),
+            _ => {}
+        }
+    }
+    code.map_or(Callback::NotLogin, Callback::Code)
+}
+
+pub fn response(page: Option<Page>) -> String {
+    let Some(page) = page else {
+        return "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            .to_string();
+    };
+    let body = html(page);
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    )
+}
+
+const LOGO: [&str; 6] = [
+    r" _ _       _     _   _  __",
+    r"| (_) __ _| |__ | |_(_)/ _|_   _",
+    r"| | |/ _` | '_ \| __| | |_| | | |",
+    r"| | | (_| | | | | |_| |  _| |_| |",
+    r"|_|_|\__, |_| |_|\__|_|_|  \__, |",
+    r"     |___/                 |___/",
+];
+
+fn escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+fn html(page: Page) -> String {
+    let (mark, mark_class, headline, line) = match page {
+        Page::SignedIn => (
+            "✓",
+            "ok",
+            "You're signed in",
+            "Head back to your terminal. You can close this tab.",
+        ),
+        Page::Cancelled => (
+            "×",
+            "bad",
+            "Sign-in was cancelled",
+            "Head back to your terminal and press enter to try again.",
+        ),
+        Page::Failed => (
+            "×",
+            "bad",
+            "Something went wrong",
+            "Head back to your terminal for details.",
+        ),
+    };
+
+    let logo: String = LOGO
+        .iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let class = if i < 3 { "g" } else { "gd" };
+            format!("<span class=\"{class}\">{}</span>\n", escape(row))
+        })
+        .collect();
+
+    format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lightify</title>
+<style>
+  html, body {{ margin: 0; height: 100%; background: #000; }}
+  body {{ display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+         font-family: "SF Mono", Menlo, Consolas, monospace; }}
+  pre {{ margin: 0; font-size: 13px; line-height: 1.25; }}
+  .g {{ color: #1ed760; }} .gd {{ color: #0a6e33; }}
+  .headline {{ color: #fff; font-size: 17px; font-weight: 600; }}
+  .ok {{ color: #1ed760; }} .bad {{ color: #e5534b; }}
+  .line {{ color: #6a6a6a; font-size: 13px; }}
+</style>
+</head>
+<body>
+<pre>{logo}</pre>
+<div class="headline"><span class="{mark_class}">{mark}</span> {headline}</div>
+<div class="line">{line}</div>
+</body>
+</html>
+"#
+    )
+}
+
+pub async fn listen() -> Result<TcpListener, SignInError> {
+    TcpListener::bind(LISTEN_ADDR).await.map_err(|error| {
+        if error.kind() == ErrorKind::AddrInUse {
+            SignInError::PortBusy
+        } else {
+            SignInError::Io(error)
+        }
+    })
+}
+
+pub async fn sign_in(listener: TcpListener, request: AuthRequest) -> Result<String, SignInError> {
+    let AuthRequest {
+        verifier,
+        client_id,
+        ..
+    } = request;
+
+    loop {
+        let (mut stream, _) = listener.accept().await?;
+        let line = match read_request_line(&mut stream).await {
+            Ok(line) => line,
+            Err(error) => {
+                tracing::warn!("could not read sign-in request: {error}");
+                continue;
+            }
+        };
+
+        match parse_callback(&line) {
+            Callback::NotLogin => respond(&mut stream, None).await,
+            Callback::Denied => {
+                respond(&mut stream, Some(Page::Cancelled)).await;
+                return Err(SignInError::Cancelled);
+            }
+            Callback::Code(code) => {
+                let result = exchange(client_id, code, verifier).await;
+                let page = if result.is_ok() {
+                    Page::SignedIn
+                } else {
+                    Page::Failed
+                };
+                respond(&mut stream, Some(page)).await;
+                return result;
+            }
+        }
+    }
+}
+
+async fn read_request_line(stream: &mut TcpStream) -> std::io::Result<String> {
+    let mut line = String::new();
+    BufReader::new(stream).read_line(&mut line).await?;
+    Ok(line)
+}
+
+async fn respond(stream: &mut TcpStream, page: Option<Page>) {
+    let result = async {
+        stream.write_all(response(page).as_bytes()).await?;
+        stream.shutdown().await
+    }
+    .await;
+    if let Err(error) = result {
+        tracing::warn!("could not answer the browser: {error}");
+    }
+}
+
+async fn exchange(
+    client_id: String,
+    code: String,
+    verifier: PkceCodeVerifier,
+) -> Result<String, SignInError> {
+    let task = tokio::task::spawn_blocking(move || {
+        let http = oauth2::reqwest::blocking::Client::new();
+        client(&client_id)
+            .exchange_code(AuthorizationCode::new(code))
+            .set_pkce_verifier(verifier)
+            .request(&http)
+            .map(|token| token.access_token().secret().to_string())
+            .map_err(|error| SignInError::Exchange(error.to_string()))
+    });
+
+    match tokio::time::timeout(EXCHANGE_TIMEOUT, task).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(join)) => Err(SignInError::Exchange(join.to_string())),
+        Err(_) => Err(SignInError::Exchange(
+            "Spotify took too long to answer".to_string(),
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn code_is_read_from_login_redirect() {
+        assert_eq!(
+            parse_callback("GET /login?code=abc&state=x HTTP/1.1"),
+            Callback::Code("abc".into())
+        );
+    }
+
+    #[test]
+    fn error_param_means_denied() {
+        assert_eq!(
+            parse_callback("GET /login?error=access_denied&state=x HTTP/1.1"),
+            Callback::Denied
+        );
+    }
+
+    #[test]
+    fn non_login_paths_are_ignored() {
+        assert_eq!(
+            parse_callback("GET /favicon.ico HTTP/1.1"),
+            Callback::NotLogin
+        );
+        assert!(response(None).starts_with("HTTP/1.1 404"));
+    }
+
+    #[test]
+    fn pages_are_html_with_their_copy() {
+        let ok = response(Some(Page::SignedIn));
+        assert!(ok.contains("Content-Type: text/html; charset=utf-8"));
+        assert!(ok.contains("You're signed in"));
+        assert!(response(Some(Page::Cancelled)).contains("press enter to try again"));
+    }
+
+    #[test]
+    fn authorize_url_forces_the_dialog() {
+        let url = authorize("id").url;
+        assert!(url.contains("show_dialog=true"));
+        assert!(url.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A8898%2Flogin"));
+    }
+}
