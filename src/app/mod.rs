@@ -145,7 +145,6 @@ impl Playback {
                 album,
                 duration_ms,
                 uri,
-                // the TUI doesn't draw covers
                 cover_url: _,
             } => {
                 self.track = Some(NowPlaying {
@@ -501,7 +500,6 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
             app.playback.apply(update);
             effects
         }
-        // handled here rather than as an Action, so media keys work in insert mode too
         Message::Media(event) => {
             let command = match event {
                 MediaEvent::Toggle => PlayerCommand::PlayPause,
@@ -510,6 +508,12 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
                 MediaEvent::Next => PlayerCommand::Next,
                 MediaEvent::Previous => PlayerCommand::Prev,
                 MediaEvent::SetPosition { position_ms } => PlayerCommand::Seek(position_ms),
+                MediaEvent::SeekBy { offset_ms } => PlayerCommand::Seek(
+                    app.playback
+                        .current_position_ms()
+                        .saturating_add_signed(offset_ms),
+                ),
+                MediaEvent::Quit => return vec![Effect::Quit],
             };
             vec![Effect::Player(command)]
         }

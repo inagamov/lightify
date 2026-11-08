@@ -2,13 +2,13 @@ use std::time::Duration;
 
 use souvlaki::{
     MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig,
+    SeekDirection,
 };
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::message::Message;
 use crate::spotify::player::PlayerUpdate;
 
-/// A media key, Now Playing button press, or progress bar drag from the OS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaEvent {
     Play,
@@ -17,37 +17,40 @@ pub enum MediaEvent {
     Next,
     Previous,
     SetPosition { position_ms: u32 },
+    SeekBy { offset_ms: i32 },
+    Quit,
 }
 
-/// lightify's entry in the OS media controls (Now Playing on macOS, MPRIS on Linux).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlayState {
+    Stopped,
+    Paused,
+    Playing,
+}
+
 pub struct MediaSession {
     controls: MediaControls,
-    // Seeked doesn't say whether we're playing, but the widget needs it with the position
-    playing: bool,
+    state: PlayState,
 }
 
 impl MediaSession {
-    /// Registers with the OS and forwards media keys to `tx`. Returns `None` where
-    /// media controls are unavailable; lightify works without them.
     pub fn start(tx: UnboundedSender<Message>) -> Option<Self> {
-        // Windows needs a window handle, which a terminal app doesn't have
         if cfg!(target_os = "windows") {
+            tracing::info!("media controls are not supported on Windows");
             return None;
         }
 
-        // macOS only publishes commands to other apps (Control Center, notch widgets)
-        // when they are registered on the main thread; play/pause slip through either way
         let controls = on_main_thread(move || Self::register(tx))?;
         Some(Self {
             controls,
-            playing: false,
+            state: PlayState::Stopped,
         })
     }
 
-    /// Creates the OS controls and attaches the handler that forwards their events.
     fn register(tx: UnboundedSender<Message>) -> Option<MediaControls> {
+        let dbus_name = format!("lightify.instance{}", std::process::id());
         let config = PlatformConfig {
-            dbus_name: "lightify",
+            dbus_name: &dbus_name,
             display_name: "lightify",
             hwnd: None,
         };
@@ -59,7 +62,7 @@ impl MediaSession {
                 tracing::debug!(?control_event, "media event");
                 let event = match control_event {
                     MediaControlEvent::Play => MediaEvent::Play,
-                    MediaControlEvent::Pause => MediaEvent::Pause,
+                    MediaControlEvent::Pause | MediaControlEvent::Stop => MediaEvent::Pause,
                     MediaControlEvent::Toggle => MediaEvent::Toggle,
                     MediaControlEvent::Next => MediaEvent::Next,
                     MediaControlEvent::Previous => MediaEvent::Previous,
@@ -68,9 +71,21 @@ impl MediaSession {
                             position_ms: u32::try_from(position.as_millis()).unwrap_or(u32::MAX),
                         }
                     }
-                    _ => return,
+                    MediaControlEvent::SeekBy(direction, offset) => {
+                        let offset_ms = i32::try_from(offset.as_millis()).unwrap_or(i32::MAX);
+                        MediaEvent::SeekBy {
+                            offset_ms: match direction {
+                                SeekDirection::Forward => offset_ms,
+                                SeekDirection::Backward => -offset_ms,
+                            },
+                        }
+                    }
+                    MediaControlEvent::Quit => MediaEvent::Quit,
+                    other => {
+                        tracing::info!(?other, "media event not supported");
+                        return;
+                    }
                 };
-                // the receiver is gone only while lightify is quitting
                 let _ = tx.send(Message::Media(event));
             })
             .inspect_err(|error| tracing::warn!(?error, "could not attach media keys"))
@@ -82,11 +97,6 @@ impl MediaSession {
         Some(controls)
     }
 
-    /// Shows a player update in the OS media widget. Unlike `Playback::apply`, it keeps
-    /// the track on Stopped/Disconnected and clears it only on ConnectionLost.
-    ///
-    /// souvlaki's macOS backend never returns an error, so the warnings here only ever
-    /// fire on Linux (D-Bus).
     pub fn apply(&mut self, update: &PlayerUpdate) {
         let result = match update {
             PlayerUpdate::TrackChanged {
@@ -102,27 +112,22 @@ impl MediaSession {
                     title: Some(name.as_str()),
                     artist: Some(artist.as_str()),
                     album: Some(album.as_str()),
-                    // macOS downloads it in the background, so it shows up a moment later
                     cover_url: cover_url.as_deref(),
                     duration: Some(Duration::from_millis((*duration_ms).into())),
                 })
             }
-            // macOS doesn't tick the progress bar itself; it counts on from the last
-            // position we send, so every state change carries one
             PlayerUpdate::Playing { position_ms } => {
-                self.playing = true;
-                self.set_playback(Some(*position_ms))
+                self.set_playback(PlayState::Playing, Some(*position_ms))
             }
             PlayerUpdate::Paused { position_ms } => {
-                self.playing = false;
-                self.set_playback(Some(*position_ms))
+                self.set_playback(PlayState::Paused, Some(*position_ms))
             }
-            PlayerUpdate::Seeked { position_ms } => self.set_playback(Some(*position_ms)),
-            // Stopped also arrives between tracks and right after Disconnected, so it
-            // keeps the track on screen instead of clearing it
+            PlayerUpdate::Seeked { .. } if self.state == PlayState::Stopped => return,
+            PlayerUpdate::Seeked { position_ms } => {
+                self.set_playback(self.state, Some(*position_ms))
+            }
             PlayerUpdate::Stopped | PlayerUpdate::Disconnected => {
-                self.playing = false;
-                self.set_playback(None)
+                self.set_playback(PlayState::Paused, None)
             }
             PlayerUpdate::ConnectionLost(_) => {
                 self.clear();
@@ -135,25 +140,27 @@ impl MediaSession {
         }
     }
 
-    /// Sends the current play state, with the position in ms when it is known.
-    fn set_playback(&mut self, position_ms: Option<u32>) -> Result<(), souvlaki::Error> {
+    fn set_playback(
+        &mut self,
+        state: PlayState,
+        position_ms: Option<u32>,
+    ) -> Result<(), souvlaki::Error> {
+        self.state = state;
         let progress = position_ms.map(|ms| MediaPosition(Duration::from_millis(ms.into())));
-        let playback = if self.playing {
-            MediaPlayback::Playing { progress }
-        } else {
-            MediaPlayback::Paused { progress }
+        let playback = match state {
+            PlayState::Stopped => MediaPlayback::Stopped,
+            PlayState::Paused => MediaPlayback::Paused { progress },
+            PlayState::Playing => MediaPlayback::Playing { progress },
         };
         self.controls.set_playback(playback)?;
         #[cfg(target_os = "macos")]
-        macos::set_playback_rate(self.playing);
+        macos::set_playback_rate(state == PlayState::Playing);
         Ok(())
     }
 
     fn clear(&mut self) {
-        self.playing = false;
         let result = self
-            .controls
-            .set_playback(MediaPlayback::Stopped)
+            .set_playback(PlayState::Stopped, None)
             .and_then(|()| self.controls.set_metadata(MediaMetadata::default()));
         if let Err(error) = result {
             tracing::warn!(?error, "could not clear media controls");
@@ -167,12 +174,11 @@ impl Drop for MediaSession {
     }
 }
 
-/// Now Playing details souvlaki leaves out, set the way Chromium does.
 #[cfg(target_os = "macos")]
 use macos::on_main_thread;
 
 #[cfg(not(target_os = "macos"))]
-fn on_main_thread<R>(work: impl FnOnce() -> R) -> R {
+fn on_main_thread<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     work()
 }
 
@@ -186,8 +192,6 @@ mod macos {
         MPNowPlayingInfoCenter, MPNowPlayingInfoPropertyPlaybackRate, MPRemoteCommandCenter,
     };
 
-    /// Runs `work` on the main thread and waits for it. `main` keeps the main thread
-    /// pumping its run loop, which serves the dispatch main queue.
     pub fn on_main_thread<R: Send>(work: impl FnOnce() -> R + Send) -> R {
         if MainThreadMarker::new().is_some() {
             return work();
@@ -197,10 +201,7 @@ mod macos {
         result.expect("exec_sync runs the closure before returning")
     }
 
-    /// Turns off the commands lightify doesn't handle. They start out enabled with no
-    /// handler, and then Control Center dims next/previous and freezes the progress bar.
     pub fn disable_unhandled_commands() {
-        // SAFETY: plain property access on the shared command center
         unsafe {
             let center = MPRemoteCommandCenter::sharedCommandCenter();
             center.stopCommand().setEnabled(false);
@@ -220,10 +221,7 @@ mod macos {
         }
     }
 
-    /// Adds the playback rate to the current Now Playing info: 1 while playing, 0 while
-    /// paused. macOS needs it to move the progress bar and to let it be dragged.
     pub fn set_playback_rate(playing: bool) {
-        // SAFETY: the dictionary holds only NSString keys and Foundation values
         unsafe {
             let center = MPNowPlayingInfoCenter::defaultCenter();
             let info = NSMutableDictionary::<NSString, AnyObject>::new();
