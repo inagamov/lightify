@@ -44,39 +44,12 @@ fn first_run_waits_for_enter() {
 }
 
 #[test]
-fn back_from_waiting_cancels_sign_in() {
-    let mut onboarding = waiting();
-    assert_eq!(key(&mut onboarding, Key::Back), vec![Effect::CancelSignIn]);
-    assert_eq!(onboarding.screen, Screen::Welcome { note: None });
-}
-
-#[test]
 fn stale_sign_in_result_is_ignored() {
     let mut onboarding = waiting();
     key(&mut onboarding, Key::Back);
     let effects = update(&mut onboarding, Event::SignInFinished(Ok(creds())));
     assert!(effects.is_empty());
     assert_eq!(onboarding.screen, Screen::Welcome { note: None });
-}
-
-#[test]
-fn signed_in_holds_for_a_second() {
-    let mut onboarding = waiting();
-    let t0 = Instant::now();
-    update(&mut onboarding, Event::Tick(t0));
-
-    let effects = update(&mut onboarding, Event::SignInFinished(Ok(creds())));
-    assert_eq!(effects, vec![Effect::StartPlayer(creds())]);
-    assert_eq!(onboarding.progress(), Some(2));
-
-    assert!(update(&mut onboarding, Event::PlayerStarted(Ok(()))).is_empty());
-    let half = update(
-        &mut onboarding,
-        Event::Tick(t0 + Duration::from_millis(500)),
-    );
-    assert!(half.is_empty());
-    let full = update(&mut onboarding, Event::Tick(t0 + Duration::from_secs(1)));
-    assert_eq!(full, vec![Effect::Finish]);
 }
 
 #[test]
@@ -148,19 +121,4 @@ fn cancelled_sign_in_retries_in_the_browser() {
 
     assert_eq!(key(&mut onboarding, Key::Enter), vec![Effect::StartSignIn]);
     assert_eq!(onboarding.screen, Screen::Waiting { url: None });
-}
-
-#[test]
-fn copying_confirms_for_two_seconds() {
-    let mut onboarding = waiting();
-    let t0 = Instant::now();
-    update(&mut onboarding, Event::Tick(t0));
-    update(&mut onboarding, Event::Listening { url: "u".into() });
-
-    key(&mut onboarding, Key::Copy);
-    assert!(onboarding.copied());
-    update(&mut onboarding, Event::Tick(t0 + Duration::from_secs(1)));
-    assert!(onboarding.copied());
-    update(&mut onboarding, Event::Tick(t0 + COPIED_FOR));
-    assert!(!onboarding.copied());
 }

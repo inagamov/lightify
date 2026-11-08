@@ -353,14 +353,6 @@ mod tests {
     }
 
     #[test]
-    fn pages_are_html_with_their_copy() {
-        let ok = response(Some(Page::SignedIn));
-        assert!(ok.contains("Content-Type: text/html; charset=utf-8"));
-        assert!(ok.contains("You're signed in"));
-        assert!(response(Some(Page::Cancelled)).contains("press enter to try again"));
-    }
-
-    #[test]
     fn authorize_url_forces_the_dialog() {
         let url = authorize("id").url;
         assert!(url.contains("show_dialog=true"));

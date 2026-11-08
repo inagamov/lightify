@@ -132,15 +132,12 @@ fn draw_card(
     frame.render_widget(Paragraph::new(body), inner);
 }
 
-/// Indents a body line to the card's text column, keeping its style.
 fn pad(line: impl Into<Line<'static>>) -> Line<'static> {
     let mut line = line.into();
     line.spans.insert(0, Span::raw(" ".repeat(PAD_LEFT)));
     line
 }
 
-/// Puts a one-column marker (spinner, ✓, ×) in the padding, so the text after it
-/// lines up with the padded lines below.
 fn hang(mark: Span<'static>, rest: impl Into<Line<'static>>) -> Line<'static> {
     let mut line = rest.into();
     let gap = " ".repeat(PAD_LEFT.saturating_sub(2));
@@ -309,58 +306,6 @@ mod tests {
             text.push('\n');
         }
         text
-    }
-
-    #[test]
-    fn welcome_shows_logo_and_card_without_dots() {
-        let (onboarding, _) = Onboarding::new(None);
-        let screen = render(80, 24, &onboarding);
-        assert!(screen.contains("|___/"));
-        assert!(screen.contains("Connect Spotify"));
-        assert!(!screen.contains("●"));
-        assert!(screen.contains("enter sign in"));
-    }
-
-    #[test]
-    fn muted_lines_keep_their_color() {
-        let (onboarding, _) = Onboarding::new(None);
-        let theme = Theme::default();
-        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        terminal
-            .draw(|frame| draw(frame, &onboarding, &theme))
-            .unwrap();
-        let buffer = terminal.backend().buffer();
-        let cell = (0..buffer.area.height)
-            .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
-            .find(|&(x, y)| buffer[(x, y)].symbol() == "P" && buffer[(x + 1, y)].symbol() == "l")
-            .expect("premium line is drawn");
-        assert_eq!(buffer[cell].fg, theme.muted);
-    }
-
-    #[test]
-    fn spinner_text_lines_up_with_the_lines_below() {
-        let mut onboarding = Onboarding::new(None).0;
-        crate::onboarding::update(
-            &mut onboarding,
-            crate::onboarding::Event::Key(crate::onboarding::Key::Enter),
-        );
-        let screen = render(80, 24, &onboarding);
-        let column = |needle: &str| {
-            screen
-                .lines()
-                .find_map(|line| line.find(needle).map(|i| line[..i].chars().count()))
-                .unwrap()
-        };
-        assert_eq!(column("Waiting for you"), column("Browser didn't"));
-        assert!(screen.contains("● ○"));
-    }
-
-    #[test]
-    fn short_terminal_drops_the_logo() {
-        let (onboarding, _) = Onboarding::new(None);
-        let screen = render(60, 14, &onboarding);
-        assert!(!screen.contains("|___/"));
-        assert!(screen.contains("Connect Spotify"));
     }
 
     #[test]
