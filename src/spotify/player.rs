@@ -64,6 +64,34 @@ pub enum PlayerError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartFailure {
+    NoPremium,
+    BadCredentials,
+    Other(String),
+}
+
+impl PlayerError {
+    pub fn failure(&self) -> StartFailure {
+        if matches!(self, PlayerError::NoCredentials) {
+            return StartFailure::BadCredentials;
+        }
+
+        let mut source: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(error) = source {
+            let text = error.to_string();
+            if text.contains("Premium account required") {
+                return StartFailure::NoPremium;
+            }
+            if text.contains("Bad credentials") {
+                return StartFailure::BadCredentials;
+            }
+            source = error.source();
+        }
+        StartFailure::Other(self.to_string())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlayerUpdate {
     TrackChanged {
         name: String,
@@ -516,5 +544,30 @@ fn translate(event: PlayerEvent) -> Option<PlayerUpdate> {
             })
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn premium_login_failure_is_recognised() {
+        let error = PlayerError::Spirc(librespot::core::Error::permission_denied(
+            "Login failed with reason: Premium account required".to_string(),
+        ));
+        assert_eq!(error.failure(), StartFailure::NoPremium);
+    }
+
+    #[test]
+    fn bad_credentials_are_recognised() {
+        let error = PlayerError::Spirc(librespot::core::Error::permission_denied(
+            "Login failed with reason: Bad credentials".to_string(),
+        ));
+        assert_eq!(error.failure(), StartFailure::BadCredentials);
+        assert_eq!(
+            PlayerError::NoCredentials.failure(),
+            StartFailure::BadCredentials
+        );
     }
 }

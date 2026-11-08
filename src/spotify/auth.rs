@@ -25,6 +25,10 @@ pub struct Login {
     pub credentials: Credentials,
 }
 
+pub fn open_cache(cache_dir: &Path) -> Result<Cache, AuthError> {
+    Cache::new(Some(cache_dir.to_path_buf()), None, None, None).map_err(AuthError::Cache)
+}
+
 pub async fn login(cache_dir: &Path) -> Result<Login, AuthError> {
     let cache =
         Cache::new(Some(cache_dir.to_path_buf()), None, None, None).map_err(AuthError::Cache)?;
