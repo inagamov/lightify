@@ -164,8 +164,8 @@ fn body(onboarding: &Onboarding, theme: &Theme, width: usize) -> Vec<Line<'stati
                 lines.push(Line::default());
             }
             for (n, text) in [
-                ("1", "Your browser opens Spotify's sign-in page"),
-                ("2", "Press \"Continue to the app\" there"),
+                ("1", "Sign in to Spotify in your browser"),
+                ("2", "Press \"Continue to the app\""),
                 ("3", "Come back here and start listening"),
             ] {
                 lines.push(pad(vec![
