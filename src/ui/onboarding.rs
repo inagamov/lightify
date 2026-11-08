@@ -129,15 +129,24 @@ fn draw_card(
     frame.render_widget(block, area);
     gradient::border(frame.buffer_mut(), theme, area, true);
 
-    let padded: Vec<Line> = body
-        .into_iter()
-        .map(|line| {
-            let mut spans = vec![Span::raw(" ".repeat(PAD_LEFT))];
-            spans.extend(line.spans);
-            Line::from(spans)
-        })
-        .collect();
-    frame.render_widget(Paragraph::new(padded), inner);
+    frame.render_widget(Paragraph::new(body), inner);
+}
+
+/// Indents a body line to the card's text column, keeping its style.
+fn pad(line: impl Into<Line<'static>>) -> Line<'static> {
+    let mut line = line.into();
+    line.spans.insert(0, Span::raw(" ".repeat(PAD_LEFT)));
+    line
+}
+
+/// Puts a one-column marker (spinner, ✓, ×) in the padding, so the text after it
+/// lines up with the padded lines below.
+fn hang(mark: Span<'static>, rest: impl Into<Line<'static>>) -> Line<'static> {
+    let mut line = rest.into();
+    let gap = " ".repeat(PAD_LEFT.saturating_sub(2));
+    line.spans
+        .splice(0..0, [Span::raw(gap), mark, Span::raw(" ")]);
+    line
 }
 
 fn body(onboarding: &Onboarding, theme: &Theme, width: usize) -> Vec<Line<'static>> {
@@ -150,7 +159,7 @@ fn body(onboarding: &Onboarding, theme: &Theme, width: usize) -> Vec<Line<'stati
         Screen::Welcome { note } => {
             if *note == Some(Note::SavedLoginRejected) {
                 for row in wrap("Your saved login stopped working. Sign in again.", width) {
-                    lines.push(Line::styled(row, dim));
+                    lines.push(pad(Line::styled(row, dim)));
                 }
                 lines.push(Line::default());
             }
@@ -159,39 +168,37 @@ fn body(onboarding: &Onboarding, theme: &Theme, width: usize) -> Vec<Line<'stati
                 ("2", "You approve lightify there"),
                 ("3", "Come back here and start listening"),
             ] {
-                lines.push(Line::from(vec![
+                lines.push(pad(vec![
                     Span::styled(n, accent),
                     Span::raw(format!("  {}", truncate(text, width.saturating_sub(3)))),
                 ]));
             }
             lines.push(Line::default());
-            lines.push(Line::styled("Playback needs Spotify Premium.", dim));
+            lines.push(pad(Line::styled("Playback needs Spotify Premium.", dim)));
         }
         Screen::Waiting { url } => {
-            lines.push(Line::from(vec![
-                spinner,
-                Span::raw(" Waiting for you to approve in the browser"),
-            ]));
+            lines.push(hang(spinner, "Waiting for you to approve in the browser"));
             lines.push(Line::default());
-            lines.push(Line::styled(
+            lines.push(pad(Line::styled(
                 "Browser didn't open? Copy the link with c,",
                 dim,
-            ));
-            lines.push(Line::styled("or open it yourself:", dim));
+            )));
+            lines.push(pad(Line::styled("or open it yourself:", dim)));
             if let Some(url) = url {
-                lines.push(Line::styled(truncate(url, width), dim));
+                lines.push(pad(Line::styled(truncate(url, width), dim)));
             }
         }
         Screen::SignedIn { .. } => {
-            lines.push(Line::from(vec![
+            lines.push(hang(
                 Span::styled("✓", accent),
-                Span::raw(" "),
-                Span::styled("Signed in.", Style::new().add_modifier(Modifier::BOLD)),
-                Span::raw(" Loading your playlists…"),
-            ]));
+                vec![
+                    Span::styled("Signed in.", Style::new().add_modifier(Modifier::BOLD)),
+                    Span::raw(" Loading your playlists…"),
+                ],
+            ));
         }
         Screen::Connecting => {
-            lines.push(Line::from(vec![spinner, Span::raw(" Connecting…")]));
+            lines.push(hang(spinner, "Connecting…"));
         }
         Screen::Failed { failure } => {
             let (message, detail) = match failure {
@@ -203,18 +210,20 @@ fn body(onboarding: &Onboarding, theme: &Theme, width: usize) -> Vec<Line<'stati
                 ),
                 Failure::Network(error) => ("Couldn't reach Spotify.", Some(error.as_str())),
             };
-            for (i, row) in wrap(message, width.saturating_sub(2))
-                .into_iter()
-                .enumerate()
-            {
-                let prefix = if i == 0 { "× " } else { "  " };
-                lines.push(Line::styled(format!("{prefix}{row}"), theme.error()));
+            let error = theme.error();
+            for (i, row) in wrap(message, width).into_iter().enumerate() {
+                let row = Line::styled(row, error);
+                lines.push(if i == 0 {
+                    hang(Span::styled("×", error), row)
+                } else {
+                    pad(row)
+                });
             }
             if let Some(detail) = detail {
-                lines.push(Line::styled(truncate(detail, width), dim));
+                lines.push(pad(Line::styled(truncate(detail, width), dim)));
             }
             lines.push(Line::default());
-            lines.push(Line::styled("Press enter to try again.", dim));
+            lines.push(pad(Line::styled("Press enter to try again.", dim)));
         }
     }
     lines.push(Line::default());
@@ -224,6 +233,9 @@ fn body(onboarding: &Onboarding, theme: &Theme, width: usize) -> Vec<Line<'stati
 fn hint_spans(onboarding: &Onboarding, theme: &Theme) -> Vec<Span<'static>> {
     let hints: &[(&str, &str)] = match onboarding.screen {
         Screen::Welcome { .. } => &[("enter", "sign in"), ("q", "quit")],
+        Screen::Waiting { .. } if onboarding.copied() => {
+            &[("✓", "link copied"), ("o", "open again"), ("esc", "back")]
+        }
         Screen::Waiting { .. } => &[("c", "copy link"), ("o", "open again"), ("esc", "back")],
         Screen::Failed { .. } => &[("enter", "try again"), ("q", "quit")],
         Screen::Connecting | Screen::SignedIn { .. } => &[("q", "quit")],
@@ -300,13 +312,47 @@ mod tests {
     }
 
     #[test]
-    fn welcome_shows_logo_card_and_dots() {
+    fn welcome_shows_logo_and_card_without_dots() {
         let (onboarding, _) = Onboarding::new(None);
         let screen = render(80, 24, &onboarding);
         assert!(screen.contains("|___/"));
         assert!(screen.contains("Connect Spotify"));
-        assert!(screen.contains("● ○"));
+        assert!(!screen.contains("●"));
         assert!(screen.contains("enter sign in"));
+    }
+
+    #[test]
+    fn muted_lines_keep_their_color() {
+        let (onboarding, _) = Onboarding::new(None);
+        let theme = Theme::default();
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &onboarding, &theme))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let cell = (0..buffer.area.height)
+            .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
+            .find(|&(x, y)| buffer[(x, y)].symbol() == "P" && buffer[(x + 1, y)].symbol() == "l")
+            .expect("premium line is drawn");
+        assert_eq!(buffer[cell].fg, theme.muted);
+    }
+
+    #[test]
+    fn spinner_text_lines_up_with_the_lines_below() {
+        let mut onboarding = Onboarding::new(None).0;
+        crate::onboarding::update(
+            &mut onboarding,
+            crate::onboarding::Event::Key(crate::onboarding::Key::Enter),
+        );
+        let screen = render(80, 24, &onboarding);
+        let column = |needle: &str| {
+            screen
+                .lines()
+                .find_map(|line| line.find(needle).map(|i| line[..i].chars().count()))
+                .unwrap()
+        };
+        assert_eq!(column("Waiting for you"), column("Browser didn't"));
+        assert!(screen.contains("● ○"));
     }
 
     #[test]

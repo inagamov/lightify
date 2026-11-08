@@ -127,6 +127,8 @@ fn rejected_saved_login_returns_to_welcome() {
             note: Some(Note::SavedLoginRejected)
         }
     );
+    assert_eq!(onboarding.progress(), None);
+    key(&mut onboarding, Key::Enter);
     assert_eq!(onboarding.progress(), Some(1));
 }
 
@@ -146,4 +148,19 @@ fn cancelled_sign_in_retries_in_the_browser() {
 
     assert_eq!(key(&mut onboarding, Key::Enter), vec![Effect::StartSignIn]);
     assert_eq!(onboarding.screen, Screen::Waiting { url: None });
+}
+
+#[test]
+fn copying_confirms_for_two_seconds() {
+    let mut onboarding = waiting();
+    let t0 = Instant::now();
+    update(&mut onboarding, Event::Tick(t0));
+    update(&mut onboarding, Event::Listening { url: "u".into() });
+
+    key(&mut onboarding, Key::Copy);
+    assert!(onboarding.copied());
+    update(&mut onboarding, Event::Tick(t0 + Duration::from_secs(1)));
+    assert!(onboarding.copied());
+    update(&mut onboarding, Event::Tick(t0 + COPIED_FOR));
+    assert!(!onboarding.copied());
 }

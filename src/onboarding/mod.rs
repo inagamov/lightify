@@ -12,6 +12,7 @@ mod tests;
 
 pub const STEPS: usize = 2;
 pub const SIGNED_IN_HOLD: Duration = Duration::from_secs(1);
+pub const COPIED_FOR: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Screen {
@@ -75,6 +76,7 @@ pub struct Onboarding {
     pub screen: Screen,
     pub first_run: bool,
     pub spinner: usize,
+    copied_until: Option<Instant>,
     retry: Retry,
     last_tick: Instant,
 }
@@ -88,6 +90,7 @@ impl Onboarding {
                     screen: Screen::Connecting,
                     first_run: false,
                     spinner: 0,
+                    copied_until: None,
                     retry: Retry::Connect(credentials.clone()),
                     last_tick,
                 },
@@ -98,6 +101,7 @@ impl Onboarding {
                     screen: Screen::Welcome { note: None },
                     first_run: true,
                     spinner: 0,
+                    copied_until: None,
                     retry: Retry::SignIn,
                     last_tick,
                 },
@@ -111,9 +115,15 @@ impl Onboarding {
             return None;
         }
         match self.screen {
+            Screen::Welcome { .. } => None,
             Screen::SignedIn { .. } => Some(2),
             _ => Some(1),
         }
+    }
+
+    /// Whether the "link copied" confirmation is showing.
+    pub fn copied(&self) -> bool {
+        self.copied_until.is_some()
     }
 
     fn fail(&mut self, failure: Failure) {
@@ -137,6 +147,9 @@ pub fn update(onboarding: &mut Onboarding, event: Event) -> Vec<Effect> {
         Event::Tick(now) => {
             onboarding.spinner = onboarding.spinner.wrapping_add(1);
             onboarding.last_tick = now;
+            if onboarding.copied_until.is_some_and(|until| now >= until) {
+                onboarding.copied_until = None;
+            }
             match onboarding.screen {
                 Screen::SignedIn { since, ready: true }
                     if now.duration_since(since) >= SIGNED_IN_HOLD =>
@@ -152,7 +165,11 @@ pub fn update(onboarding: &mut Onboarding, event: Event) -> Vec<Effect> {
 fn on_key(onboarding: &mut Onboarding, key: Key) -> Vec<Effect> {
     match (&onboarding.screen, key) {
         (Screen::Welcome { .. }, Key::Enter) => start_sign_in(onboarding),
-        (Screen::Waiting { url: Some(url) }, Key::Copy) => vec![Effect::CopyLink(url.clone())],
+        (Screen::Waiting { url: Some(url) }, Key::Copy) => {
+            let effects = vec![Effect::CopyLink(url.clone())];
+            onboarding.copied_until = Some(onboarding.last_tick + COPIED_FOR);
+            effects
+        }
         (Screen::Waiting { url: Some(url) }, Key::Open) => vec![Effect::OpenBrowser(url.clone())],
         (Screen::Waiting { .. }, Key::Back) => {
             onboarding.screen = Screen::Welcome { note: None };
