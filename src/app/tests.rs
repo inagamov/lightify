@@ -26,6 +26,7 @@ fn disconnect_clears_playback_and_starts_reconnecting() {
             album: "".into(),
             duration_ms: 1,
             uri: "spotify:track:t".into(),
+            cover_url: None,
         }),
     );
     update(&mut app, player(PlayerUpdate::Playing { position_ms: 0 }));

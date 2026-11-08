@@ -1,15 +1,29 @@
 mod action;
 mod app;
 mod config;
+mod media;
 mod message;
 mod spotify;
 mod theme;
 mod ui;
 
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+#[cfg(target_os = "macos")]
+use dispatch2::DispatchQueue;
 use futures::StreamExt;
+#[cfg(target_os = "macos")]
+use objc2::MainThreadMarker;
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{
+    NSApplication, NSApplicationActivationPolicy, NSEvent, NSEventMask, NSEventModifierFlags,
+    NSEventType,
+};
+#[cfg(target_os = "macos")]
+use objc2_foundation::{NSDate, NSDefaultRunLoopMode, NSPoint};
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::time::MissedTickBehavior;
@@ -19,13 +33,89 @@ use tracing_subscriber::prelude::*;
 
 use crate::action::Action;
 use crate::app::{App, Effect, Input, LibraryRequest, Mode, Status, update};
+use crate::media::MediaSession;
 use crate::message::Message;
 use crate::spotify::library::Library;
 use crate::spotify::player::PlayerCommand;
 use crate::theme::Theme;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    let program = std::thread::Builder::new()
+        .name("lightify".into())
+        .stack_size(8 << 20)
+        .spawn(|| {
+            #[cfg(target_os = "macos")]
+            let _wake = WakeEventLoopOnDrop;
+            tokio::runtime::Runtime::new()?.block_on(async_main())
+        })?;
+
+    #[cfg(target_os = "macos")]
+    run_app_event_loop();
+
+    match program.join() {
+        Ok(result) => result,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+
+#[cfg(target_os = "macos")]
+static PROGRAM_FINISHED: AtomicBool = AtomicBool::new(false);
+
+/// Marks the program finished and wakes the main thread's event loop when dropped.
+#[cfg(target_os = "macos")]
+struct WakeEventLoopOnDrop;
+
+#[cfg(target_os = "macos")]
+impl Drop for WakeEventLoopOnDrop {
+    fn drop(&mut self) {
+        PROGRAM_FINISHED.store(true, Ordering::Release);
+        // NSApplication is main-thread-only, so the event is posted from there
+        DispatchQueue::main().exec_async(|| {
+            let mtm = MainThreadMarker::new().expect("the main queue runs on the main thread");
+            let app = NSApplication::sharedApplication(mtm);
+            // an empty event, only so nextEventMatchingMask returns
+            let event = NSEvent::otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2(
+                NSEventType::ApplicationDefined,
+                NSPoint::new(0.0, 0.0),
+                NSEventModifierFlags::empty(),
+                0.0,
+                0,
+                None,
+                0,
+                0,
+                0,
+            );
+            if let Some(event) = event {
+                app.postEvent_atStart(&event, true);
+            }
+        });
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn run_app_event_loop() {
+    let mtm = MainThreadMarker::new().expect("main runs on the main thread");
+    let app = NSApplication::sharedApplication(mtm);
+
+    app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+    app.finishLaunching();
+
+    let forever = NSDate::distantFuture();
+    while !PROGRAM_FINISHED.load(Ordering::Acquire) {
+        // sleeps until an event arrives, serving the run loop meanwhile
+        let event = app.nextEventMatchingMask_untilDate_inMode_dequeue(
+            NSEventMask::Any,
+            Some(&forever),
+            unsafe { NSDefaultRunLoopMode },
+            true,
+        );
+        if let Some(event) = event {
+            app.sendEvent(&event);
+        }
+    }
+}
+
+async fn async_main() -> anyhow::Result<()> {
     let cache_dir = config::cache_dir();
     std::fs::create_dir_all(&cache_dir)?;
 
@@ -54,18 +144,24 @@ async fn main() -> anyhow::Result<()> {
     let player =
         spotify::player::start(login.session.clone(), login.credentials, tx.clone()).await?;
 
+    let mut media = MediaSession::start(tx.clone());
+
     let mut terminal = ratatui::init();
     let library = Library::new(login.session.clone());
     let result = run(
         &mut terminal,
         library,
         player.commands.clone(),
+        media.as_mut(),
         tx,
         rx,
         config.theme,
     )
     .await;
     ratatui::restore();
+
+    // after restore: on Linux, dropping the D-Bus controls waits on their thread
+    drop(media);
 
     player.shutdown().await;
     login.session.shutdown();
@@ -76,6 +172,7 @@ async fn run(
     terminal: &mut DefaultTerminal,
     library: Library,
     player: UnboundedSender<PlayerCommand>,
+    mut media: Option<&mut MediaSession>,
     tx: UnboundedSender<Message>,
     mut rx: UnboundedReceiver<Message>,
     theme: Theme,
@@ -116,7 +213,12 @@ async fn run(
                 Some(Err(error)) => return Err(error.into()),
                 None => return Ok(()),
             },
-            Some(message) = rx.recv() => Input::Message(message),
+            Some(message) = rx.recv() => {
+                if let (Some(media), Message::Player(update)) = (&mut media, &message) {
+                    media.apply(update);
+                }
+                Input::Message(message)
+            }
             _ = tick.tick(), if app.playback.is_playing() => Input::Message(Message::Tick),
         };
 

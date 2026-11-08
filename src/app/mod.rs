@@ -5,6 +5,7 @@ use std::time::Instant;
 use ratatui::widgets::{ListState, TableState};
 
 use crate::action::Action;
+use crate::media::MediaEvent;
 use crate::message::Message;
 use crate::spotify::library::PAGE_SIZE;
 use crate::spotify::model::{LibraryItem, Source, Track};
@@ -144,6 +145,7 @@ impl Playback {
                 album,
                 duration_ms,
                 uri,
+                cover_url: _,
             } => {
                 self.track = Some(NowPlaying {
                     name,
@@ -497,6 +499,23 @@ pub fn update_message(app: &mut App, message: Message) -> Vec<Effect> {
             };
             app.playback.apply(update);
             effects
+        }
+        Message::Media(event) => {
+            let command = match event {
+                MediaEvent::Toggle => PlayerCommand::PlayPause,
+                MediaEvent::Play => PlayerCommand::Play,
+                MediaEvent::Pause => PlayerCommand::Pause,
+                MediaEvent::Next => PlayerCommand::Next,
+                MediaEvent::Previous => PlayerCommand::Prev,
+                MediaEvent::SetPosition { position_ms } => PlayerCommand::Seek(position_ms),
+                MediaEvent::SeekBy { offset_ms } => PlayerCommand::Seek(
+                    app.playback
+                        .current_position_ms()
+                        .saturating_add_signed(offset_ms),
+                ),
+                MediaEvent::Quit => return vec![Effect::Quit],
+            };
+            vec![Effect::Player(command)]
         }
         Message::Tick => Vec::new(),
     }

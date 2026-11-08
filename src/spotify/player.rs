@@ -27,6 +27,8 @@ pub enum PlayerCommand {
         start_index: usize,
     },
     PlayPause,
+    Play,
+    Pause,
     Next,
     Prev,
     Seek(u32),
@@ -69,6 +71,7 @@ pub enum PlayerUpdate {
         album: String,
         duration_ms: u32,
         uri: String,
+        cover_url: Option<String>,
     },
     Playing {
         position_ms: u32,
@@ -466,6 +469,8 @@ fn handle(spirc: &Spirc, command: PlayerCommand) -> Result<(), librespot::core::
             spirc.load(LoadRequest::from_tracks(uris, options))
         }
         PlayerCommand::PlayPause => spirc.play_pause(),
+        PlayerCommand::Play => spirc.play(),
+        PlayerCommand::Pause => spirc.pause(),
         PlayerCommand::Next => spirc.next(),
         PlayerCommand::Prev => spirc.prev(),
         PlayerCommand::Seek(position_ms) => spirc.set_position_ms(position_ms),
@@ -496,12 +501,18 @@ fn translate(event: PlayerEvent) -> Option<PlayerUpdate> {
                 ),
                 _ => (Vec::new(), String::new()),
             };
+            let cover_url = item
+                .covers
+                .into_iter()
+                .max_by_key(|cover| cover.width)
+                .map(|cover| cover.url);
             Some(PlayerUpdate::TrackChanged {
                 name: item.name,
                 artists,
                 album,
                 duration_ms: item.duration_ms,
                 uri: item.uri,
+                cover_url,
             })
         }
         _ => None,

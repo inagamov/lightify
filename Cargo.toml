@@ -14,6 +14,7 @@ librespot-oauth = "0.8.0"
 protobuf = "3.7"
 ratatui = { version = "0.30.2", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
+souvlaki = "0.9.3"
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 toml = "1"
@@ -26,3 +27,22 @@ vergen = "=9.0.6"
 
 [dev-dependencies]
 tokio = { version = "1.53.1", features = ["test-util"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+dispatch2 = "0.3.1"
+objc2 = "0.6.4"
+objc2-app-kit = {
+  version = "0.3.2", 
+  default-features = false,
+  features = ["std", "NSApplication", "NSEvent", "NSGraphicsContext", "NSResponder", "NSRunningApplication"] 
+}
+objc2-foundation = { 
+  version = "0.3.2",
+  default-features = false,
+  features = ["std", "NSDate", "NSDictionary", "NSGeometry", "NSObjCRuntime", "NSString", "NSRunLoop", "NSValue", "objc2-core-foundation"] 
+}
+objc2-media-player = {
+  version = "0.3.2",
+  default-features = false,
+  features = ["std", "MPRemoteCommandCenter", "MPRemoteCommand", "MPNowPlayingInfoCenter"] 
+}
