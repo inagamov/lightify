@@ -1,0 +1,303 @@
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Paragraph};
+
+use crate::logo::LOGO;
+use crate::onboarding::{Failure, Onboarding, STEPS, Screen};
+use crate::theme::Theme;
+use crate::ui::gradient;
+
+const CARD_WIDTH: u16 = 50;
+const PAD_LEFT: usize = 3;
+const MARK_WIDTH: usize = 2;
+const PAD_RIGHT: usize = 1;
+const TAGLINE: &str = "Spotify in your terminal, played right here.";
+const LOADING_DOTS: [&str; 4] = ["   ", "·  ", "·· ", "···"];
+const TICKS_PER_DOT: usize = 4;
+
+pub fn draw(frame: &mut Frame, onboarding: &Onboarding, theme: &Theme) {
+    let area = frame.area();
+    frame.render_widget(Block::new().style(theme.base()), area);
+
+    let card_width = CARD_WIDTH.min(area.width);
+    let text_width = usize::from(card_width).saturating_sub(2 + PAD_LEFT + PAD_RIGHT);
+    let body = body(onboarding, theme, text_width);
+    let card_height = to_u16(body.len() + 2);
+
+    let full = [to_u16(LOGO.len()), 1, card_height, 1];
+    let show_logo = stacked_height(&full) <= area.height;
+    let heights = if show_logo { &full[..] } else { &full[2..] };
+
+    let group = area.centered(
+        Constraint::Length(card_width),
+        Constraint::Length(stacked_height(heights).min(area.height)),
+    );
+    let rows = Layout::vertical(heights.iter().map(|&height| Constraint::Length(height)))
+        .spacing(1)
+        .split(group);
+    let [.., card_area, hints_area] = *rows else {
+        return;
+    };
+
+    if show_logo {
+        draw_logo(frame, theme, rows[0]);
+        let tagline = Line::styled(
+            TAGLINE,
+            Style::new()
+                .fg(theme.highlight)
+                .add_modifier(Modifier::BOLD),
+        );
+        frame.render_widget(Paragraph::new(tagline).centered(), rows[1]);
+    }
+
+    draw_card(frame, onboarding, theme, card_area, body);
+    frame.render_widget(
+        Paragraph::new(Line::from(hint_spans(onboarding, theme))).centered(),
+        hints_area,
+    );
+}
+
+fn stacked_height(heights: &[u16]) -> u16 {
+    let gaps = to_u16(heights.len().saturating_sub(1));
+    heights.iter().sum::<u16>() + gaps
+}
+
+fn to_u16(n: usize) -> u16 {
+    u16::try_from(n).unwrap_or(u16::MAX)
+}
+
+fn draw_logo(frame: &mut Frame, theme: &Theme, area: Rect) {
+    let width = LOGO.iter().map(|row| row.len()).max().unwrap_or(0);
+    let area = area.centered_horizontally(Constraint::Length(to_u16(width)));
+    let lines: Vec<Line> = LOGO
+        .iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let color = if i < 3 {
+                theme.accent
+            } else {
+                theme.accent_deep
+            };
+            Line::styled(*row, Style::new().fg(color))
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn draw_card(
+    frame: &mut Frame,
+    onboarding: &Onboarding,
+    theme: &Theme,
+    area: Rect,
+    body: Vec<Line<'static>>,
+) {
+    let mut title = vec![Span::raw("Connect Spotify")];
+    if matches!(
+        onboarding.screen,
+        Screen::Waiting { .. } | Screen::Connecting
+    ) {
+        title.push(Span::raw(" "));
+        let frame = onboarding.spinner / TICKS_PER_DOT % LOADING_DOTS.len();
+        title.push(Span::raw(LOADING_DOTS[frame]));
+    }
+    let mut block = theme.pane(true).block(title);
+    if let Some(filled) = onboarding.progress() {
+        let mut spans = vec![Span::raw(" ")];
+        for step in 0..STEPS {
+            if step > 0 {
+                spans.push(Span::raw(" "));
+            }
+            if step < filled {
+                spans.push(Span::styled("●", Style::new().fg(theme.accent)));
+            } else {
+                spans.push(Span::styled("○", theme.dim()));
+            }
+        }
+        spans.push(Span::raw(" "));
+        block = block.title_top(Line::from(spans).right_aligned());
+    }
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    gradient::border(frame.buffer_mut(), theme, area, true);
+
+    frame.render_widget(Paragraph::new(body), inner);
+}
+
+fn pad(line: impl Into<Line<'static>>) -> Line<'static> {
+    let mut line = line.into();
+    line.spans.insert(0, Span::raw(" ".repeat(PAD_LEFT)));
+    line
+}
+
+/// spinner, ✓, ×
+fn hang(mark: Span<'static>, rest: impl Into<Line<'static>>) -> Line<'static> {
+    let mut line = rest.into();
+    let gap = " ".repeat(PAD_LEFT.saturating_sub(MARK_WIDTH));
+    line.spans
+        .splice(0..0, [Span::raw(gap), mark, Span::raw(" ")]);
+    line
+}
+
+fn body(onboarding: &Onboarding, theme: &Theme, width: usize) -> Vec<Line<'static>> {
+    let accent = Style::new().fg(theme.accent);
+    let dim = theme.dim();
+
+    let mut lines = vec![Line::default()];
+    match &onboarding.screen {
+        Screen::Welcome {
+            saved_login_rejected,
+        } => {
+            if *saved_login_rejected {
+                for row in wrap("Your saved login stopped working. Sign in again.", width) {
+                    lines.push(pad(Line::styled(row, dim)));
+                }
+                lines.push(Line::default());
+            }
+            for (n, text) in [
+                ("1", "Sign in to Spotify in your browser"),
+                ("2", "Press \"Continue to the app\""),
+                ("3", "Come back here and start listening"),
+            ] {
+                lines.push(pad(vec![
+                    Span::styled(n, accent),
+                    Span::raw(format!("  {}", truncate(text, width.saturating_sub(3)))),
+                ]));
+            }
+            lines.push(Line::default());
+            lines.push(pad(Line::styled("Playback needs Spotify Premium.", dim)));
+        }
+        Screen::Waiting { url, .. } => {
+            lines.push(pad("Waiting for you to approve in the browser"));
+            lines.push(Line::default());
+            lines.push(pad(Line::styled(
+                "Browser didn't open? Copy the link with c,",
+                dim,
+            )));
+            lines.push(pad(Line::styled("or open it yourself:", dim)));
+            if let Some(url) = url {
+                lines.push(pad(Line::styled(truncate(url, width), dim)));
+            }
+        }
+        Screen::SignedIn { .. } => {
+            lines.push(hang(
+                Span::styled("✓", accent),
+                vec![
+                    Span::styled("Signed in.", Style::new().add_modifier(Modifier::BOLD)),
+                    Span::raw(" Loading your playlists…"),
+                ],
+            ));
+        }
+        Screen::Connecting => {
+            lines.push(pad("Connecting…"));
+        }
+        Screen::Failed { failure } => {
+            let (message, detail) = match failure {
+                Failure::Cancelled => ("Sign-in was cancelled.", None),
+                Failure::PortBusy => ("Port 8898 is busy. Is another lightify running?", None),
+                Failure::NoPremium => (
+                    "This account doesn't have Spotify Premium, which playback needs.",
+                    None,
+                ),
+                Failure::Audio(error) => (
+                    "Couldn't open an audio output on this computer.",
+                    Some(error.as_str()),
+                ),
+                Failure::Network(error) => ("Couldn't reach Spotify.", Some(error.as_str())),
+            };
+            let error = theme.error();
+            for (i, row) in wrap(message, width).into_iter().enumerate() {
+                let row = Line::styled(row, error);
+                lines.push(if i == 0 {
+                    hang(Span::styled("×", error), row)
+                } else {
+                    pad(row)
+                });
+            }
+            if let Some(detail) = detail {
+                lines.push(pad(Line::styled(truncate(detail, width), dim)));
+            }
+            lines.push(Line::default());
+            lines.push(pad(Line::styled("Press enter to try again.", dim)));
+        }
+    }
+    lines.push(Line::default());
+    lines
+}
+
+fn hint_spans(onboarding: &Onboarding, theme: &Theme) -> Vec<Span<'static>> {
+    let hints: &[(&str, &str)] = match onboarding.screen {
+        Screen::Welcome { .. } => &[("enter", "sign in"), ("q", "quit")],
+        Screen::Waiting { .. } if onboarding.copied() => {
+            &[("✓", "link copied"), ("o", "open again"), ("esc", "back")]
+        }
+        Screen::Waiting { .. } => &[("c", "copy link"), ("o", "open again"), ("esc", "back")],
+        Screen::Failed { .. } => &[("enter", "try again"), ("q", "quit")],
+        Screen::Connecting | Screen::SignedIn { .. } => &[("q", "quit")],
+    };
+    let key_style = Style::new().fg(theme.accent);
+    let mut spans = Vec::new();
+    for (i, (key, description)) in hints.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw("  "));
+        }
+        spans.push(Span::styled(*key, key_style));
+        spans.push(Span::styled(format!(" {description}"), theme.dim()));
+    }
+    spans
+}
+
+fn truncate(text: &str, width: usize) -> String {
+    if text.chars().count() <= width {
+        return text.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let mut out: String = text.chars().take(width - 1).collect();
+    out.push('…');
+    out
+}
+
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut rows = Vec::new();
+    let mut row = String::new();
+    for word in text.split_whitespace() {
+        let needed = if row.is_empty() {
+            word.chars().count()
+        } else {
+            row.chars().count() + 1 + word.chars().count()
+        };
+        if needed > width && !row.is_empty() {
+            rows.push(std::mem::take(&mut row));
+        }
+        if !row.is_empty() {
+            row.push(' ');
+        }
+        row.push_str(word);
+    }
+    if !row.is_empty() {
+        rows.push(row);
+    }
+    rows
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    use super::*;
+
+    #[test]
+    fn tiny_terminal_draws_without_panic() {
+        let (onboarding, _) = Onboarding::new(None);
+        let mut terminal = Terminal::new(TestBackend::new(30, 8)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &onboarding, &Theme::default()))
+            .unwrap();
+    }
+}

@@ -133,7 +133,11 @@ impl MediaSession {
                 self.clear();
                 return;
             }
-            PlayerUpdate::Volume(_) | PlayerUpdate::Reconnected => return,
+            PlayerUpdate::Volume(_)
+            | PlayerUpdate::Reconnected
+            | PlayerUpdate::Unavailable { .. } => {
+                return;
+            }
         };
         if let Err(error) = result {
             tracing::warn!(?error, "could not update media controls");

@@ -61,6 +61,42 @@ pub enum PlayerError {
 
     #[error("connection attempt timed out")]
     Timeout,
+
+    #[error("the player stopped unexpectedly: {0}")]
+    Crashed(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartFailure {
+    NoPremium,
+    BadCredentials,
+    Audio(String),
+    Other(String),
+}
+
+impl PlayerError {
+    pub fn failure(&self) -> StartFailure {
+        match self {
+            PlayerError::NoCredentials => return StartFailure::BadCredentials,
+            PlayerError::NoBackend | PlayerError::NoMixer | PlayerError::Mixer(_) => {
+                return StartFailure::Audio(self.to_string());
+            }
+            _ => {}
+        }
+
+        let mut source: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(error) = source {
+            let text = error.to_string();
+            if text.contains("Premium account required") {
+                return StartFailure::NoPremium;
+            }
+            if text.contains("Bad credentials") {
+                return StartFailure::BadCredentials;
+            }
+            source = error.source();
+        }
+        StartFailure::Other(self.to_string())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +120,9 @@ pub enum PlayerUpdate {
     },
     Volume(u16),
     Stopped,
+    Unavailable {
+        uri: String,
+    },
     Disconnected,
     Reconnected,
     ConnectionLost(Option<String>),
@@ -413,14 +452,18 @@ pub async fn start(
         ..ConnectConfig::default()
     };
 
-    let connected = connect(
-        connect_config.clone(),
-        current,
-        credentials,
-        player.clone(),
-        mixer.clone(),
+    let connected = timeout(
+        CONNECT_TIMEOUT,
+        connect(
+            connect_config.clone(),
+            current,
+            credentials,
+            player.clone(),
+            mixer.clone(),
+        ),
     )
-    .await?;
+    .await
+    .unwrap_or(Err(PlayerError::Timeout))?;
 
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<PlayerCommand>();
     let task = tokio::spawn(
@@ -492,6 +535,10 @@ fn translate(event: PlayerEvent) -> Option<PlayerUpdate> {
 
         PlayerEvent::Stopped { .. } | PlayerEvent::EndOfTrack { .. } => Some(PlayerUpdate::Stopped),
 
+        PlayerEvent::Unavailable { track_id, .. } => Some(PlayerUpdate::Unavailable {
+            uri: track_id.to_string(),
+        }),
+
         PlayerEvent::TrackChanged { audio_item } => {
             let item = *audio_item;
             let (artists, album) = match item.unique_fields {
@@ -516,5 +563,38 @@ fn translate(event: PlayerEvent) -> Option<PlayerUpdate> {
             })
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn premium_login_failure_is_recognised() {
+        let error = PlayerError::Spirc(librespot::core::Error::permission_denied(
+            "Login failed with reason: Premium account required".to_string(),
+        ));
+        assert_eq!(error.failure(), StartFailure::NoPremium);
+    }
+
+    #[test]
+    fn bad_credentials_are_recognised() {
+        let error = PlayerError::Spirc(librespot::core::Error::permission_denied(
+            "Login failed with reason: Bad credentials".to_string(),
+        ));
+        assert_eq!(error.failure(), StartFailure::BadCredentials);
+        assert_eq!(
+            PlayerError::NoCredentials.failure(),
+            StartFailure::BadCredentials
+        );
+    }
+
+    #[test]
+    fn missing_audio_is_not_a_network_failure() {
+        assert!(matches!(
+            PlayerError::NoBackend.failure(),
+            StartFailure::Audio(_)
+        ));
     }
 }
