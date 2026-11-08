@@ -224,10 +224,15 @@ fn on_player(onboarding: &mut Onboarding, result: Result<(), StartFailure>) -> V
             Vec::new()
         }
         Err(StartFailure::NoPremium) => {
+            // replaying the same account can't succeed, so retry offers another sign-in
+            onboarding.retry = Retry::SignIn;
             onboarding.fail(Failure::NoPremium);
             Vec::new()
         }
         Err(StartFailure::Other(error)) => {
+            if onboarding.first_run {
+                onboarding.retry = Retry::SignIn;
+            }
             onboarding.fail(Failure::Network(error));
             Vec::new()
         }

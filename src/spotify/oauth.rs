@@ -18,6 +18,7 @@ const SCOPES: &[&str] = &["streaming"];
 const AUTH_URL: &str = "https://accounts.spotify.com/authorize";
 const TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
 const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(10);
+const READ_TIMEOUT: Duration = Duration::from_secs(2);
 
 type Client = BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
 
@@ -212,10 +213,14 @@ pub async fn sign_in(listener: TcpListener, request: AuthRequest) -> Result<Stri
 
     loop {
         let (mut stream, _) = listener.accept().await?;
-        let line = match read_request_line(&mut stream).await {
-            Ok(line) => line,
-            Err(error) => {
+        let line = match tokio::time::timeout(READ_TIMEOUT, read_request_line(&mut stream)).await {
+            Ok(Ok(line)) => line,
+            Ok(Err(error)) => {
                 tracing::warn!("could not read sign-in request: {error}");
+                continue;
+            }
+            Err(_) => {
+                tracing::debug!("dropped an idle browser connection");
                 continue;
             }
         };
@@ -284,6 +289,32 @@ async fn exchange(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn an_idle_connection_does_not_block_the_redirect() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (_, verifier) = PkceCodeChallenge::new_random_sha256();
+        let request = AuthRequest {
+            url: String::new(),
+            verifier,
+            state: CsrfToken::new("x".into()),
+            client_id: "id".into(),
+        };
+        let sign_in = tokio::spawn(sign_in(listener, request));
+
+        let _idle = TcpStream::connect(addr).await.unwrap();
+        let mut real = TcpStream::connect(addr).await.unwrap();
+        real.write_all(b"GET /login?error=access_denied&state=x HTTP/1.1\r\n\r\n")
+            .await
+            .unwrap();
+
+        let result = tokio::time::timeout(Duration::from_secs(10), sign_in)
+            .await
+            .expect("sign-in stalled on the idle connection")
+            .unwrap();
+        assert!(matches!(result, Err(SignInError::Cancelled)));
+    }
 
     #[test]
     fn code_is_read_from_login_redirect() {

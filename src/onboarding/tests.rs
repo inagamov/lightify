@@ -80,19 +80,33 @@ fn signed_in_holds_for_a_second() {
 }
 
 #[test]
-fn no_premium_retries_the_connection() {
+fn no_premium_signs_in_again() {
+    for mut onboarding in [returning(), waiting()] {
+        if onboarding.screen != Screen::Connecting {
+            update(&mut onboarding, Event::SignInFinished(Ok(creds())));
+        }
+        update(
+            &mut onboarding,
+            Event::PlayerStarted(Err(StartFailure::NoPremium)),
+        );
+        assert_eq!(
+            onboarding.screen,
+            Screen::Failed {
+                failure: Failure::NoPremium
+            }
+        );
+        assert_eq!(key(&mut onboarding, Key::Enter), vec![Effect::StartSignIn]);
+        assert_eq!(onboarding.screen, Screen::Waiting { url: None });
+    }
+}
+
+#[test]
+fn returning_user_network_failure_retries_the_connection() {
     let mut onboarding = returning();
     update(
         &mut onboarding,
-        Event::PlayerStarted(Err(StartFailure::NoPremium)),
+        Event::PlayerStarted(Err(StartFailure::Other("down".into()))),
     );
-    assert_eq!(
-        onboarding.screen,
-        Screen::Failed {
-            failure: Failure::NoPremium
-        }
-    );
-
     assert_eq!(
         key(&mut onboarding, Key::Enter),
         vec![Effect::StartPlayer(creds())]
