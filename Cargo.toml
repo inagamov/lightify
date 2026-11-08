@@ -11,7 +11,7 @@ dirs = "7.0.0"
 form_urlencoded = "1.2.2"
 futures = "0.3.34"
 librespot = "0.8.0"
-oauth2 = { version = "5.0.0", default-features = false, features = ["reqwest-blocking"] }
+oauth2 = { version = "5.0.0", default-features = false, features = ["reqwest", "native-tls"] }
 open = "5"
 protobuf = "3.7"
 ratatui = { version = "0.30.2", features = ["serde"] }

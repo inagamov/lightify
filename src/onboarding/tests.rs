@@ -140,3 +140,19 @@ fn cancelled_sign_in_retries_in_the_browser() {
         }
     );
 }
+
+#[test]
+fn network_failure_after_sign_in_retries_the_connection() {
+    let mut onboarding = waiting();
+    update(&mut onboarding, Event::SignInFinished(Ok(creds())));
+    update(
+        &mut onboarding,
+        Event::PlayerStarted(Err(StartFailure::Other("down".into()))),
+    );
+    assert_eq!(
+        key(&mut onboarding, Key::Enter),
+        vec![Effect::StartPlayer(creds())]
+    );
+    assert!(matches!(onboarding.screen, Screen::SignedIn { .. }));
+    assert_eq!(onboarding.progress(), Some(2));
+}

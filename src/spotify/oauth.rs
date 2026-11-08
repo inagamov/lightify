@@ -9,7 +9,7 @@ use oauth2::{
 use thiserror::Error;
 
 use crate::logo::LOGO;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 
 pub const REDIRECT_URI: &str = "http://127.0.0.1:8898/login";
@@ -19,6 +19,7 @@ const AUTH_URL: &str = "https://accounts.spotify.com/authorize";
 const TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
 const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(10);
 const READ_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_REQUEST_LINE: u64 = 8 * 1024;
 
 type Client = BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
 
@@ -259,7 +260,15 @@ pub async fn sign_in(listener: TcpListener, request: AuthRequest) -> Result<Stri
 
 async fn read_request_line(stream: &mut TcpStream) -> std::io::Result<String> {
     let mut line = String::new();
-    BufReader::new(stream).read_line(&mut line).await?;
+    BufReader::new(stream.take(MAX_REQUEST_LINE))
+        .read_line(&mut line)
+        .await?;
+    if !line.ends_with('\n') {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidData,
+            "request line too long or cut off",
+        ));
+    }
     Ok(line)
 }
 
@@ -279,19 +288,18 @@ async fn exchange(
     code: String,
     verifier: PkceCodeVerifier,
 ) -> Result<String, SignInError> {
-    let task = tokio::task::spawn_blocking(move || {
-        let http = oauth2::reqwest::blocking::Client::new();
-        client(&client_id)
-            .exchange_code(AuthorizationCode::new(code))
-            .set_pkce_verifier(verifier)
-            .request(&http)
-            .map(|token| token.access_token().secret().to_string())
-            .map_err(|error| SignInError::Exchange(error.to_string()))
-    });
+    let http = oauth2::reqwest::Client::builder()
+        .redirect(oauth2::reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| SignInError::Exchange(error.to_string()))?;
+    let client = client(&client_id);
+    let request = client
+        .exchange_code(AuthorizationCode::new(code))
+        .set_pkce_verifier(verifier);
 
-    match tokio::time::timeout(EXCHANGE_TIMEOUT, task).await {
-        Ok(Ok(result)) => result,
-        Ok(Err(join)) => Err(SignInError::Exchange(join.to_string())),
+    match tokio::time::timeout(EXCHANGE_TIMEOUT, request.request_async(&http)).await {
+        Ok(Ok(token)) => Ok(token.access_token().secret().to_string()),
+        Ok(Err(error)) => Err(SignInError::Exchange(error.to_string())),
         Err(_) => Err(SignInError::Exchange(
             "Spotify took too long to answer".to_string(),
         )),

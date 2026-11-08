@@ -207,6 +207,10 @@ fn body(onboarding: &Onboarding, theme: &Theme, width: usize) -> Vec<Line<'stati
                     "This account doesn't have Spotify Premium, which playback needs.",
                     None,
                 ),
+                Failure::Audio(error) => (
+                    "Couldn't open an audio output on this computer.",
+                    Some(error.as_str()),
+                ),
                 Failure::Network(error) => ("Couldn't reach Spotify.", Some(error.as_str())),
             };
             let error = theme.error();

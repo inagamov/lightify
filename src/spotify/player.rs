@@ -70,13 +70,18 @@ pub enum PlayerError {
 pub enum StartFailure {
     NoPremium,
     BadCredentials,
+    Audio(String),
     Other(String),
 }
 
 impl PlayerError {
     pub fn failure(&self) -> StartFailure {
-        if matches!(self, PlayerError::NoCredentials) {
-            return StartFailure::BadCredentials;
+        match self {
+            PlayerError::NoCredentials => return StartFailure::BadCredentials,
+            PlayerError::NoBackend | PlayerError::NoMixer | PlayerError::Mixer(_) => {
+                return StartFailure::Audio(self.to_string());
+            }
+            _ => {}
         }
 
         let mut source: Option<&(dyn std::error::Error + 'static)> = Some(self);
@@ -583,5 +588,13 @@ mod tests {
             PlayerError::NoCredentials.failure(),
             StartFailure::BadCredentials
         );
+    }
+
+    #[test]
+    fn missing_audio_is_not_a_network_failure() {
+        assert!(matches!(
+            PlayerError::NoBackend.failure(),
+            StartFailure::Audio(_)
+        ));
     }
 }

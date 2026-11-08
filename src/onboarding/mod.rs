@@ -43,6 +43,7 @@ pub enum Failure {
     Cancelled,
     PortBusy,
     NoPremium,
+    Audio(String),
     Network(String),
 }
 
@@ -85,7 +86,7 @@ enum Retry {
 #[derive(Debug)]
 pub struct Onboarding {
     pub screen: Screen,
-    pub first_run: bool,
+    signing_in: bool,
     pub spinner: usize,
     retry: Retry,
     last_tick: Instant,
@@ -98,7 +99,7 @@ impl Onboarding {
             Some(credentials) => (
                 Self {
                     screen: Screen::Connecting,
-                    first_run: false,
+                    signing_in: false,
                     spinner: 0,
                     retry: Retry::Connect(credentials.clone()),
                     last_tick,
@@ -108,7 +109,7 @@ impl Onboarding {
             None => (
                 Self {
                     screen: Screen::Welcome { note: None },
-                    first_run: true,
+                    signing_in: false,
                     spinner: 0,
                     retry: Retry::SignIn,
                     last_tick,
@@ -119,7 +120,7 @@ impl Onboarding {
     }
 
     pub fn progress(&self) -> Option<usize> {
-        if !self.first_run {
+        if !self.signing_in {
             return None;
         }
         match self.screen {
@@ -146,7 +147,7 @@ impl Onboarding {
 
 pub fn update(onboarding: &mut Onboarding, event: Event) -> Vec<Effect> {
     match event {
-        Event::Key(Key::Quit) => vec![Effect::CancelSignIn, Effect::Quit],
+        Event::Key(Key::Quit) => vec![Effect::Quit],
         Event::Key(key) => on_key(onboarding, key),
         Event::Listening { url } => match &mut onboarding.screen {
             Screen::Waiting { url: shown, .. } => {
@@ -197,7 +198,7 @@ fn on_key(onboarding: &mut Onboarding, key: Key) -> Vec<Effect> {
         (Screen::Failed { .. }, Key::Enter) => match onboarding.retry.clone() {
             Retry::SignIn => start_sign_in(onboarding),
             Retry::Connect(credentials) => {
-                onboarding.screen = if onboarding.first_run {
+                onboarding.screen = if onboarding.signing_in {
                     Screen::SignedIn {
                         since: onboarding.last_tick,
                         ready: false,
@@ -213,6 +214,7 @@ fn on_key(onboarding: &mut Onboarding, key: Key) -> Vec<Effect> {
 }
 
 fn start_sign_in(onboarding: &mut Onboarding) -> Vec<Effect> {
+    onboarding.signing_in = true;
     onboarding.screen = Screen::Waiting {
         url: None,
         copied_until: None,
@@ -267,10 +269,11 @@ fn on_player(onboarding: &mut Onboarding, result: Result<(), StartFailure>) -> V
             onboarding.fail(Failure::NoPremium);
             Vec::new()
         }
+        Err(StartFailure::Audio(error)) => {
+            onboarding.fail(Failure::Audio(error));
+            Vec::new()
+        }
         Err(StartFailure::Other(error)) => {
-            if onboarding.first_run {
-                onboarding.retry = Retry::SignIn;
-            }
             onboarding.fail(Failure::Network(error));
             Vec::new()
         }
@@ -278,7 +281,6 @@ fn on_player(onboarding: &mut Onboarding, result: Result<(), StartFailure>) -> V
             onboarding.screen = Screen::Welcome {
                 note: Some(Note::SavedLoginRejected),
             };
-            onboarding.first_run = true;
             onboarding.retry = Retry::SignIn;
             Vec::new()
         }
