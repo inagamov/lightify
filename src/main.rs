@@ -180,6 +180,7 @@ async fn run(
     let mut app = App::new().with_theme(theme);
 
     let mut events = EventStream::new();
+    let mut prefix = None;
 
     let mut pending = update(&mut app, Input::Action(Action::Refresh));
     let mut tick = tokio::time::interval(Duration::from_millis(250));
@@ -204,7 +205,7 @@ async fn run(
         let input = tokio::select! {
             maybe_event = events.next() => match maybe_event {
                 Some(Ok(Event::Key(key))) if key.kind == KeyEventKind::Press => {
-                    match key_to_action(key, app.mode()) {
+                    match key_to_action(key, app.mode(), &mut prefix) {
                         Some(action) => Input::Action(action),
                         None => continue,
                     }
@@ -238,14 +239,26 @@ fn send_player_command(
     }
 }
 
-fn key_to_action(key: KeyEvent, mode: Mode) -> Option<Action> {
+fn key_to_action(key: KeyEvent, mode: Mode, prefix: &mut Option<char>) -> Option<Action> {
     match mode {
-        Mode::Normal => normal_key(key),
+        Mode::Normal => match prefix.take() {
+            Some(first) => prefixed_key(first, key),
+            None => normal_key(key, prefix),
+        },
         Mode::Insert => insert_key(key),
     }
 }
 
-fn normal_key(key: KeyEvent) -> Option<Action> {
+fn prefixed_key(first: char, key: KeyEvent) -> Option<Action> {
+    match (first, key.code) {
+        ('z', KeyCode::Char('t')) => Some(Action::ScrollCursorTop),
+        ('z', KeyCode::Char('z')) => Some(Action::ScrollCursorCenter),
+        ('z', KeyCode::Char('b')) => Some(Action::ScrollCursorBottom),
+        _ => None,
+    }
+}
+
+fn normal_key(key: KeyEvent, prefix: &mut Option<char>) -> Option<Action> {
     match key.code {
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             Some(Action::HalfPageDown)
@@ -259,6 +272,10 @@ fn normal_key(key: KeyEvent) -> Option<Action> {
         // TODO: switch to 'gg' (needs multi-key keymap)
         KeyCode::Char('g') => Some(Action::GoTop),
         KeyCode::Char('G') => Some(Action::GoBottom),
+        KeyCode::Char('z') => {
+            *prefix = Some('z');
+            None
+        }
         KeyCode::Char('h') => Some(Action::FocusSidebar),
         KeyCode::Char('l') => Some(Action::FocusMain),
         KeyCode::Enter => Some(Action::Select),
@@ -338,12 +355,12 @@ mod tests {
         for c in ['q', 'j', 's', '1', ' '] {
             let key = KeyEvent::from(KeyCode::Char(c));
             assert_eq!(
-                key_to_action(key, Mode::Insert),
+                key_to_action(key, Mode::Insert, &mut None),
                 Some(Action::InsertChar(c))
             );
         }
 
         let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert_eq!(key_to_action(ctrl_c, Mode::Insert), None);
+        assert_eq!(key_to_action(ctrl_c, Mode::Insert, &mut None), None);
     }
 }

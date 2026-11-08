@@ -43,6 +43,26 @@ trait Selectable {
         *offset = offset.saturating_add_signed(delta).min(max_offset);
         self.move_by(len, delta);
     }
+
+    fn align_selected(&mut self, len: usize, visible: usize, align: Align) {
+        let Some(selected) = self.selected() else {
+            return;
+        };
+        let rows_above = match align {
+            Align::Top => 0,
+            Align::Center => visible.saturating_sub(1) / 2,
+            Align::Bottom => visible.saturating_sub(1),
+        };
+        let max_offset = len.saturating_sub(visible);
+        *self.offset_mut() = selected.saturating_sub(rows_above).min(max_offset);
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Align {
+    Top,
+    Center,
+    Bottom,
 }
 
 impl Selectable for ListState {
@@ -339,6 +359,9 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
             state.scroll_by(len, visible, -half_page(count, visible));
             load_more_if_near_end(app)
         }
+        Action::ScrollCursorTop => scroll_cursor(app, count, Align::Top),
+        Action::ScrollCursorCenter => scroll_cursor(app, count, Align::Center),
+        Action::ScrollCursorBottom => scroll_cursor(app, count, Align::Bottom),
         Action::GoTop => {
             let (state, len) = focused_list(app);
             state.move_by(len, isize::MIN);
@@ -618,6 +641,15 @@ fn focused_page(app: &mut App) -> (&mut dyn Selectable, usize, usize) {
         Focus::Main => (&mut app.track_list, app.tracks.len(), app.track_rows),
         Focus::Search => unreachable!("insert mode drops movement actions in update_action"),
     }
+}
+
+fn scroll_cursor(app: &mut App, count: Option<usize>, align: Align) -> Vec<Effect> {
+    let (state, len, visible) = focused_page(app);
+    if let Some(row) = count {
+        state.select_row(len, row);
+    }
+    state.align_selected(len, visible, align);
+    load_more_if_near_end(app)
 }
 
 fn half_page(count: Option<usize>, visible: usize) -> isize {
