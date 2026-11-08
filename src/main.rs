@@ -3,6 +3,7 @@ mod app;
 mod config;
 mod media;
 mod message;
+mod onboarding;
 mod spotify;
 mod theme;
 mod ui;
