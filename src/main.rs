@@ -180,6 +180,7 @@ async fn run(
     let mut app = App::new().with_theme(theme);
 
     let mut events = EventStream::new();
+    let mut prefix = None;
 
     let mut pending = update(&mut app, Input::Action(Action::Refresh));
     let mut tick = tokio::time::interval(Duration::from_millis(250));
@@ -204,7 +205,7 @@ async fn run(
         let input = tokio::select! {
             maybe_event = events.next() => match maybe_event {
                 Some(Ok(Event::Key(key))) if key.kind == KeyEventKind::Press => {
-                    match key_to_action(key, app.mode()) {
+                    match key_to_action(key, app.mode(), &mut prefix) {
                         Some(action) => Input::Action(action),
                         None => continue,
                     }
@@ -238,34 +239,63 @@ fn send_player_command(
     }
 }
 
-fn key_to_action(key: KeyEvent, mode: Mode) -> Option<Action> {
+fn key_to_action(key: KeyEvent, mode: Mode, prefix: &mut Option<char>) -> Option<Action> {
     match mode {
-        Mode::Normal => normal_key(key),
+        Mode::Normal => match prefix.take() {
+            Some(first) => prefixed_key(first, key),
+            None => normal_key(key, prefix),
+        },
         Mode::Insert => insert_key(key),
+        Mode::Help => help_key(key),
     }
 }
 
-fn normal_key(key: KeyEvent) -> Option<Action> {
+fn help_key(key: KeyEvent) -> Option<Action> {
     match key.code {
+        KeyCode::Char('?' | 'q') | KeyCode::Esc => Some(Action::ToggleHelp),
+        _ => None,
+    }
+}
+
+fn prefixed_key(first: char, key: KeyEvent) -> Option<Action> {
+    match (first, key.code) {
+        ('g', KeyCode::Char('g')) => Some(Action::GoTop),
+        ('z', KeyCode::Char('t')) => Some(Action::ScrollCursorTop),
+        ('z', KeyCode::Char('z')) => Some(Action::ScrollCursorCenter),
+        ('z', KeyCode::Char('b')) => Some(Action::ScrollCursorBottom),
+        _ => None,
+    }
+}
+
+fn normal_key(key: KeyEvent, prefix: &mut Option<char>) -> Option<Action> {
+    match key.code {
+        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::HalfPageDown)
+        }
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::HalfPageUp)
+        }
         KeyCode::Char(c) if c.is_ascii_digit() => Some(Action::Digit(c as u8 - b'0')),
         KeyCode::Char('j') | KeyCode::Down => Some(Action::MoveDown),
         KeyCode::Char('k') | KeyCode::Up => Some(Action::MoveUp),
-        // TODO: switch to 'gg' (needs multi-key keymap)
-        KeyCode::Char('g') => Some(Action::GoTop),
         KeyCode::Char('G') => Some(Action::GoBottom),
-        KeyCode::Char('h') => Some(Action::FocusSidebar),
-        KeyCode::Char('l') => Some(Action::FocusMain),
+        KeyCode::Char(c @ ('g' | 'z')) => {
+            *prefix = Some(c);
+            None
+        }
+        KeyCode::Char('h') | KeyCode::Left => Some(Action::FocusSidebar),
+        KeyCode::Char('l') | KeyCode::Right => Some(Action::FocusMain),
         KeyCode::Enter => Some(Action::Select),
         KeyCode::Char(' ') => Some(Action::PlayPause),
         KeyCode::Char('n') => Some(Action::Next),
         KeyCode::Char('N') => Some(Action::Prev),
         KeyCode::Char('>') => Some(Action::SeekForward),
         KeyCode::Char('<') => Some(Action::SeekBackward),
-        // TODO: move to a group (because VolumeUp needs shift and VolumeDown does not)
-        KeyCode::Char('+') => Some(Action::VolumeUp),
+        KeyCode::Char('=') | KeyCode::Char('+') => Some(Action::VolumeUp),
         KeyCode::Char('-') => Some(Action::VolumeDown),
         KeyCode::Char('R') => Some(Action::Refresh),
         KeyCode::Char('s') => Some(Action::FocusSearch),
+        KeyCode::Char('?') => Some(Action::ToggleHelp),
         KeyCode::Char('q') => Some(Action::Quit),
         _ => None,
     }
@@ -332,12 +362,12 @@ mod tests {
         for c in ['q', 'j', 's', '1', ' '] {
             let key = KeyEvent::from(KeyCode::Char(c));
             assert_eq!(
-                key_to_action(key, Mode::Insert),
+                key_to_action(key, Mode::Insert, &mut None),
                 Some(Action::InsertChar(c))
             );
         }
 
         let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert_eq!(key_to_action(ctrl_c, Mode::Insert), None);
+        assert_eq!(key_to_action(ctrl_c, Mode::Insert, &mut None), None);
     }
 }

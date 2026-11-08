@@ -17,6 +17,7 @@ pub use text_input::TextInput;
 trait Selectable {
     fn selected(&self) -> Option<usize>;
     fn select(&mut self, index: Option<usize>);
+    fn offset_mut(&mut self) -> &mut usize;
 
     fn move_by(&mut self, len: usize, delta: isize) {
         if len == 0 {
@@ -32,6 +33,36 @@ trait Selectable {
         }
         self.select(Some(row.saturating_sub(1).min(len - 1)));
     }
+
+    fn scroll_by(&mut self, len: usize, visible: usize, delta: isize) {
+        if len == 0 {
+            return;
+        }
+        let max_offset = len.saturating_sub(visible);
+        let offset = self.offset_mut();
+        *offset = offset.saturating_add_signed(delta).min(max_offset);
+        self.move_by(len, delta);
+    }
+
+    fn align_selected(&mut self, len: usize, visible: usize, align: Align) {
+        let Some(selected) = self.selected() else {
+            return;
+        };
+        let rows_above = match align {
+            Align::Top => 0,
+            Align::Center => visible.saturating_sub(1) / 2,
+            Align::Bottom => visible.saturating_sub(1),
+        };
+        let max_offset = len.saturating_sub(visible);
+        *self.offset_mut() = selected.saturating_sub(rows_above).min(max_offset);
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Align {
+    Top,
+    Center,
+    Bottom,
 }
 
 impl Selectable for ListState {
@@ -41,6 +72,9 @@ impl Selectable for ListState {
     fn select(&mut self, index: Option<usize>) {
         ListState::select(self, index);
     }
+    fn offset_mut(&mut self) -> &mut usize {
+        ListState::offset_mut(self)
+    }
 }
 
 impl Selectable for TableState {
@@ -49,6 +83,9 @@ impl Selectable for TableState {
     }
     fn select(&mut self, index: Option<usize>) {
         TableState::select(self, index);
+    }
+    fn offset_mut(&mut self) -> &mut usize {
+        TableState::offset_mut(self)
     }
 }
 
@@ -63,6 +100,7 @@ pub enum Focus {
 pub enum Mode {
     Normal,
     Insert,
+    Help,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,12 +231,15 @@ pub struct App {
     pub library_generation: u64,
     pub playlists: Vec<LibraryItem>,
     pub sidebar: ListState,
+    pub sidebar_rows: usize,
     pub tracks: Vec<Track>,
     pub track_list: TableState,
+    pub track_rows: usize,
     pub tracks_for: Option<Source>,
     pub track_uris: Vec<String>,
     pub loading_more: bool,
     pub status: Option<Status>,
+    pub help_open: bool,
     pub playback: Playback,
     pub theme: Theme,
     pub queue: Vec<String>,
@@ -216,12 +257,15 @@ impl App {
             library_generation: 0,
             playlists: Vec::new(),
             sidebar: ListState::default().with_selected(Some(0)),
+            sidebar_rows: 0,
             tracks: Vec::new(),
             track_list: TableState::default(),
+            track_rows: 0,
             tracks_for: None,
             track_uris: Vec::new(),
             loading_more: false,
             status: None,
+            help_open: false,
             playback: Playback::default(),
             theme: Theme::default(),
             queue: Vec::new(),
@@ -230,6 +274,9 @@ impl App {
     }
 
     pub fn mode(&self) -> Mode {
+        if self.help_open {
+            return Mode::Help;
+        }
         match self.focus {
             Focus::Search => Mode::Insert,
             Focus::Sidebar | Focus::Main => Mode::Normal,
@@ -285,7 +332,7 @@ pub fn update(app: &mut App, input: Input) -> Vec<Effect> {
 }
 
 pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
-    if app.mode() == Mode::Insert && !is_insert_action(&action) {
+    if !is_allowed_in(app.mode(), &action) {
         return Vec::new();
     }
 
@@ -305,16 +352,28 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
         }
         Action::MoveUp => {
             let (state, len) = focused_list(app);
-            if state.selected().unwrap_or(0) == 0 {
-                focus_search(app);
-                return Vec::new();
-            }
             state.move_by(len, -row_delta(count));
             load_more_if_near_end(app)
         }
+        Action::HalfPageDown => {
+            let (state, len, visible) = focused_page(app);
+            state.scroll_by(len, visible, half_page(count, visible));
+            load_more_if_near_end(app)
+        }
+        Action::HalfPageUp => {
+            let (state, len, visible) = focused_page(app);
+            state.scroll_by(len, visible, -half_page(count, visible));
+            load_more_if_near_end(app)
+        }
+        Action::ScrollCursorTop => scroll_cursor(app, count, Align::Top),
+        Action::ScrollCursorCenter => scroll_cursor(app, count, Align::Center),
+        Action::ScrollCursorBottom => scroll_cursor(app, count, Align::Bottom),
         Action::GoTop => {
             let (state, len) = focused_list(app);
-            state.move_by(len, isize::MIN);
+            match count {
+                Some(row) => state.select_row(len, row),
+                None => state.move_by(len, isize::MIN),
+            }
             load_more_if_near_end(app)
         }
         Action::GoBottom => {
@@ -389,6 +448,10 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::Submit => submit_search(app),
+        Action::ToggleHelp => {
+            app.help_open = !app.help_open;
+            Vec::new()
+        }
         Action::Quit => vec![Effect::Quit],
         Action::Digit(_) => unreachable!("digits return early above"),
     }
@@ -541,6 +604,9 @@ fn select_playlist(app: &mut App) -> Vec<Effect> {
         return Vec::new();
     };
     app.focus = Focus::Main;
+    if app.is_showing(&id) && !app.tracks.is_empty() {
+        return Vec::new();
+    }
     request_tracks(app, id)
 }
 
@@ -585,11 +651,36 @@ fn focused_list(app: &mut App) -> (&mut dyn Selectable, usize) {
     }
 }
 
-fn is_insert_action(action: &Action) -> bool {
-    matches!(
-        action,
-        Action::InsertChar(_) | Action::DeleteChar | Action::Submit | Action::Cancel
-    )
+fn focused_page(app: &mut App) -> (&mut dyn Selectable, usize, usize) {
+    match app.focus {
+        Focus::Sidebar => (&mut app.sidebar, app.playlists.len(), app.sidebar_rows),
+        Focus::Main => (&mut app.track_list, app.tracks.len(), app.track_rows),
+        Focus::Search => unreachable!("insert mode drops movement actions in update_action"),
+    }
+}
+
+fn scroll_cursor(app: &mut App, count: Option<usize>, align: Align) -> Vec<Effect> {
+    let (state, len, visible) = focused_page(app);
+    if let Some(row) = count {
+        state.select_row(len, row);
+    }
+    state.align_selected(len, visible, align);
+    load_more_if_near_end(app)
+}
+
+fn half_page(count: Option<usize>, visible: usize) -> isize {
+    row_delta(count.or(Some((visible / 2).max(1))))
+}
+
+fn is_allowed_in(mode: Mode, action: &Action) -> bool {
+    match mode {
+        Mode::Normal => true,
+        Mode::Insert => matches!(
+            action,
+            Action::InsertChar(_) | Action::DeleteChar | Action::Submit | Action::Cancel
+        ),
+        Mode::Help => *action == Action::ToggleHelp,
+    }
 }
 
 fn row_delta(count: Option<usize>) -> isize {

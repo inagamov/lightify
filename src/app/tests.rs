@@ -167,7 +167,7 @@ fn normal_actions_are_ignored_while_searching() {
 }
 
 #[test]
-fn move_up_at_top_focuses_search() {
+fn move_up_at_top_stays_in_list() {
     let mut app = app_with_tracks(3);
     update(&mut app, Input::Action(Action::FocusMain));
     update(&mut app, Input::Action(Action::GoBottom));
@@ -178,8 +178,19 @@ fn move_up_at_top_focuses_search() {
     assert_eq!(app.track_list.selected(), Some(0));
 
     update(&mut app, Input::Action(Action::MoveUp));
-    assert_eq!(app.focus, Focus::Search);
-
-    update(&mut app, Input::Action(Action::Cancel));
     assert_eq!(app.focus, Focus::Main);
+    assert_eq!(app.track_list.selected(), Some(0));
+}
+
+#[test]
+fn help_swallows_other_actions_until_closed() {
+    let mut app = App::new();
+    update(&mut app, Input::Action(Action::ToggleHelp));
+    assert_eq!(app.mode(), Mode::Help);
+    assert_eq!(update(&mut app, Input::Action(Action::Quit)), vec![]);
+    update(&mut app, Input::Action(Action::ToggleHelp));
+    assert_eq!(
+        update(&mut app, Input::Action(Action::Quit)),
+        vec![Effect::Quit]
+    );
 }

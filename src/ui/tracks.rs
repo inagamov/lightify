@@ -25,6 +25,11 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
         },
     };
 
+    let block = pane.block(title);
+    let [_header_area, rows_area] =
+        Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(block.inner(area));
+    app.track_rows = usize::from(rows_area.height);
+
     let playing = app.playing_uri();
     let rows = app.tracks.iter().enumerate().map(|(i, track)| {
         let number = match selected {
@@ -67,10 +72,6 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
         Cell::from("TIME"),
     ])
     .style(app.theme.dim());
-
-    let block = pane.block(title);
-    let [_header_area, rows_area] =
-        Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(block.inner(area));
 
     let table = Table::new(rows, widths)
         .header(header)
