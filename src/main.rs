@@ -35,9 +35,10 @@ use crate::spotify::player::PlayerCommand;
 use crate::theme::Theme;
 
 fn main() -> anyhow::Result<()> {
-    // macOS delivers media keys through the Cocoa app event loop on the main thread,
-    // so the async program runs on its own thread.
-    let program = std::thread::spawn(|| tokio::runtime::Runtime::new()?.block_on(async_main()));
+    let program = std::thread::Builder::new()
+        .name("lightify".into())
+        .stack_size(8 << 20)
+        .spawn(|| tokio::runtime::Runtime::new()?.block_on(async_main()))?;
 
     #[cfg(target_os = "macos")]
     run_app_event_loop(&program);
@@ -48,12 +49,11 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-/// Pumps the Cocoa event loop until `program` finishes.
 #[cfg(target_os = "macos")]
 fn run_app_event_loop<T>(program: &JoinHandle<T>) {
     let mtm = MainThreadMarker::new().expect("main runs on the main thread");
     let app = NSApplication::sharedApplication(mtm);
-    // no Dock icon or menu bar: lightify stays a terminal program
+
     app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
     app.finishLaunching();
 
@@ -116,6 +116,7 @@ async fn async_main() -> anyhow::Result<()> {
     )
     .await;
     ratatui::restore();
+
     // after restore: on Linux, dropping the D-Bus controls waits on their thread
     drop(media);
 
