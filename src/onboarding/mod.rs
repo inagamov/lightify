@@ -11,14 +11,14 @@ pub mod run;
 mod tests;
 
 pub const STEPS: usize = 2;
-pub const SIGNED_IN_HOLD: Duration = Duration::from_secs(1);
-pub const COPIED_FOR: Duration = Duration::from_secs(2);
+const SIGNED_IN_HOLD: Duration = Duration::from_secs(1);
+const COPIED_FOR: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Screen {
     Connecting,
     Welcome {
-        note: Option<Note>,
+        saved_login_rejected: bool,
     },
     Waiting {
         url: Option<String>,
@@ -31,11 +31,6 @@ pub enum Screen {
     Failed {
         failure: Failure,
     },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Note {
-    SavedLoginRejected,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,29 +89,28 @@ pub struct Onboarding {
 
 impl Onboarding {
     pub fn new(cached: Option<Credentials>) -> (Self, Vec<Effect>) {
-        let last_tick = Instant::now();
-        match cached {
+        let (screen, retry, effects) = match cached {
             Some(credentials) => (
-                Self {
-                    screen: Screen::Connecting,
-                    signing_in: false,
-                    spinner: 0,
-                    retry: Retry::Connect(credentials.clone()),
-                    last_tick,
-                },
+                Screen::Connecting,
+                Retry::Connect(credentials.clone()),
                 vec![Effect::StartPlayer(credentials)],
             ),
             None => (
-                Self {
-                    screen: Screen::Welcome { note: None },
-                    signing_in: false,
-                    spinner: 0,
-                    retry: Retry::SignIn,
-                    last_tick,
+                Screen::Welcome {
+                    saved_login_rejected: false,
                 },
+                Retry::SignIn,
                 Vec::new(),
             ),
-        }
+        };
+        let onboarding = Self {
+            screen,
+            signing_in: false,
+            spinner: 0,
+            retry,
+            last_tick: Instant::now(),
+        };
+        (onboarding, effects)
     }
 
     pub fn progress(&self) -> Option<usize> {
@@ -192,7 +186,9 @@ fn on_key(onboarding: &mut Onboarding, key: Key) -> Vec<Effect> {
             vec![Effect::OpenBrowser(url.clone())]
         }
         (Screen::Waiting { .. }, Key::Back) => {
-            onboarding.screen = Screen::Welcome { note: None };
+            onboarding.screen = Screen::Welcome {
+                saved_login_rejected: false,
+            };
             vec![Effect::CancelSignIn]
         }
         (Screen::Failed { .. }, Key::Enter) => match onboarding.retry.clone() {
@@ -279,7 +275,7 @@ fn on_player(onboarding: &mut Onboarding, result: Result<(), StartFailure>) -> V
         }
         Err(StartFailure::BadCredentials) => {
             onboarding.screen = Screen::Welcome {
-                note: Some(Note::SavedLoginRejected),
+                saved_login_rejected: true,
             };
             onboarding.retry = Retry::SignIn;
             Vec::new()

@@ -36,7 +36,7 @@ enum Internal {
     Player(Result<PlayerHandle, PlayerError>),
 }
 
-pub fn key(key: KeyEvent) -> Option<Key> {
+fn key(key: KeyEvent) -> Option<Key> {
     if key.kind != KeyEventKind::Press {
         return None;
     }
@@ -69,7 +69,7 @@ pub async fn run(
 
     let mut sign_in: Option<JoinHandle<()>> = None;
     let mut player: Option<PlayerHandle> = None;
-    let mut attempts = 0usize;
+    let mut started_before = false;
     let mut sign_in_attempt = 0u64;
 
     loop {
@@ -94,10 +94,10 @@ pub async fn run(
                     }
                 }
                 Effect::StartPlayer(credentials) => {
-                    if attempts > 0 {
+                    if started_before {
                         session.reconnect();
                     }
-                    attempts += 1;
+                    started_before = true;
                     spawn_player(session.clone(), credentials, tx.clone(), events_tx.clone());
                 }
                 Effect::Finish => {

@@ -12,7 +12,7 @@ use crate::logo::LOGO;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 
-pub const REDIRECT_URI: &str = "http://127.0.0.1:8898/login";
+const REDIRECT_URI: &str = "http://127.0.0.1:8898/login";
 const LISTEN_ADDR: &str = "127.0.0.1:8898";
 const SCOPES: &[&str] = &["streaming"];
 const AUTH_URL: &str = "https://accounts.spotify.com/authorize";
@@ -31,7 +31,7 @@ pub struct AuthRequest {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Callback {
+enum Callback {
     Code(String),
     Denied,
     Stale,
@@ -39,7 +39,7 @@ pub enum Callback {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Page {
+enum Page {
     SignedIn,
     Cancelled,
     Failed,
@@ -85,7 +85,7 @@ pub fn authorize(client_id: &str) -> AuthRequest {
     }
 }
 
-pub fn parse_callback(request_line: &str, expected_state: &str) -> Callback {
+fn parse_callback(request_line: &str, expected_state: &str) -> Callback {
     let Some(target) = request_line.split_whitespace().nth(1) else {
         return Callback::NotLogin;
     };
@@ -101,7 +101,7 @@ pub fn parse_callback(request_line: &str, expected_state: &str) -> Callback {
         match key.as_ref() {
             "error" => error = true,
             "code" => code = Some(value.into_owned()),
-            "state" => state_matches = same(value.as_bytes(), expected_state.as_bytes()),
+            "state" => state_matches = value == expected_state,
             _ => {}
         }
     }
@@ -114,11 +114,7 @@ pub fn parse_callback(request_line: &str, expected_state: &str) -> Callback {
     code.map_or(Callback::NotLogin, Callback::Code)
 }
 
-fn same(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0, |diff, (x, y)| diff | (x ^ y)) == 0
-}
-
-pub fn response(page: Option<Page>) -> String {
+fn response(page: Option<Page>) -> String {
     let Some(page) = page else {
         return "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
             .to_string();
@@ -129,12 +125,6 @@ pub fn response(page: Option<Page>) -> String {
         body.len(),
         body
     )
-}
-
-fn escape(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
 
 fn html(page: Page) -> String {
@@ -170,7 +160,7 @@ fn html(page: Page) -> String {
         .enumerate()
         .map(|(i, row)| {
             let class = if i < 3 { "g" } else { "gd" };
-            format!("<span class=\"{class}\">{}</span>\n", escape(row))
+            format!("<span class=\"{class}\">{row}</span>\n")
         })
         .collect();
 

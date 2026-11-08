@@ -29,7 +29,12 @@ fn returning_user_connects_without_dots() {
 #[test]
 fn first_run_waits_for_enter() {
     let (mut onboarding, effects) = Onboarding::new(None);
-    assert_eq!(onboarding.screen, Screen::Welcome { note: None });
+    assert_eq!(
+        onboarding.screen,
+        Screen::Welcome {
+            saved_login_rejected: false
+        }
+    );
     assert!(effects.is_empty());
 
     assert_eq!(key(&mut onboarding, Key::Enter), vec![Effect::StartSignIn]);
@@ -55,7 +60,12 @@ fn stale_sign_in_result_is_ignored() {
     key(&mut onboarding, Key::Back);
     let effects = update(&mut onboarding, Event::SignInFinished(Ok(creds())));
     assert!(effects.is_empty());
-    assert_eq!(onboarding.screen, Screen::Welcome { note: None });
+    assert_eq!(
+        onboarding.screen,
+        Screen::Welcome {
+            saved_login_rejected: false
+        }
+    );
 }
 
 #[test]
@@ -109,7 +119,7 @@ fn rejected_saved_login_returns_to_welcome() {
     assert_eq!(
         onboarding.screen,
         Screen::Welcome {
-            note: Some(Note::SavedLoginRejected)
+            saved_login_rejected: true
         }
     );
     assert_eq!(onboarding.progress(), None);

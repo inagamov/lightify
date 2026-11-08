@@ -5,7 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 
 use crate::logo::LOGO;
-use crate::onboarding::{Failure, Note, Onboarding, STEPS, Screen};
+use crate::onboarding::{Failure, Onboarding, STEPS, Screen};
 use crate::theme::Theme;
 use crate::ui::gradient;
 
@@ -14,7 +14,8 @@ const PAD_LEFT: usize = 3;
 const MARK_WIDTH: usize = 2;
 const PAD_RIGHT: usize = 1;
 const TAGLINE: &str = "Spotify in your terminal, played right here.";
-const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const LOADING_DOTS: [&str; 4] = ["   ", "·  ", "·· ", "···"];
+const TICKS_PER_DOT: usize = 4;
 
 pub fn draw(frame: &mut Frame, onboarding: &Onboarding, theme: &Theme) {
     let area = frame.area();
@@ -25,59 +26,42 @@ pub fn draw(frame: &mut Frame, onboarding: &Onboarding, theme: &Theme) {
     let body = body(onboarding, theme, text_width);
     let card_height = to_u16(body.len() + 2);
 
-    let logo_height = to_u16(LOGO.len());
-    let with_logo = logo_height + 1 + 1 + 1 + card_height + 1 + 1;
-    let show_logo = with_logo <= area.height;
-    let height = if show_logo {
-        with_logo
-    } else {
-        card_height + 1 + 1
-    };
+    let full = [to_u16(LOGO.len()), 1, card_height, 1];
+    let show_logo = stacked_height(&full) <= area.height;
+    let heights = if show_logo { &full[..] } else { &full[2..] };
 
     let group = area.centered(
         Constraint::Length(card_width),
-        Constraint::Length(height.min(area.height)),
+        Constraint::Length(stacked_height(heights).min(area.height)),
     );
-    let mut constraints = Vec::new();
-    if show_logo {
-        constraints.extend([
-            Constraint::Length(logo_height),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-        ]);
-    }
-    constraints.extend([
-        Constraint::Length(card_height),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ]);
-    let rows = Layout::vertical(constraints).split(group);
+    let rows = Layout::vertical(heights.iter().map(|&height| Constraint::Length(height)))
+        .spacing(1)
+        .split(group);
+    let [.., card_area, hints_area] = *rows else {
+        return;
+    };
 
-    let mut next = rows.iter().copied();
     if show_logo {
-        let logo_area = next.next().unwrap_or_default();
-        draw_logo(frame, theme, logo_area);
-        next.next();
-        let tagline_area = next.next().unwrap_or_default();
+        draw_logo(frame, theme, rows[0]);
         let tagline = Line::styled(
             TAGLINE,
             Style::new()
                 .fg(theme.highlight)
                 .add_modifier(Modifier::BOLD),
         );
-        frame.render_widget(Paragraph::new(tagline).centered(), tagline_area);
-        next.next();
+        frame.render_widget(Paragraph::new(tagline).centered(), rows[1]);
     }
-    let card_area = next.next().unwrap_or_default();
-    next.next();
-    let hints_area = next.next().unwrap_or_default();
 
     draw_card(frame, onboarding, theme, card_area, body);
     frame.render_widget(
         Paragraph::new(Line::from(hint_spans(onboarding, theme))).centered(),
         hints_area,
     );
+}
+
+fn stacked_height(heights: &[u16]) -> u16 {
+    let gaps = to_u16(heights.len().saturating_sub(1));
+    heights.iter().sum::<u16>() + gaps
 }
 
 fn to_u16(n: usize) -> u16 {
@@ -109,7 +93,16 @@ fn draw_card(
     area: Rect,
     body: Vec<Line<'static>>,
 ) {
-    let mut block = theme.pane(true).block("Connect Spotify");
+    let mut title = vec![Span::raw("Connect Spotify")];
+    if matches!(
+        onboarding.screen,
+        Screen::Waiting { .. } | Screen::Connecting
+    ) {
+        title.push(Span::raw(" "));
+        let frame = onboarding.spinner / TICKS_PER_DOT % LOADING_DOTS.len();
+        title.push(Span::raw(LOADING_DOTS[frame]));
+    }
+    let mut block = theme.pane(true).block(title);
     if let Some(filled) = onboarding.progress() {
         let mut spans = vec![Span::raw(" ")];
         for step in 0..STEPS {
@@ -151,12 +144,13 @@ fn hang(mark: Span<'static>, rest: impl Into<Line<'static>>) -> Line<'static> {
 fn body(onboarding: &Onboarding, theme: &Theme, width: usize) -> Vec<Line<'static>> {
     let accent = Style::new().fg(theme.accent);
     let dim = theme.dim();
-    let spinner = Span::styled(SPINNER[onboarding.spinner % SPINNER.len()], accent);
 
     let mut lines = vec![Line::default()];
     match &onboarding.screen {
-        Screen::Welcome { note } => {
-            if *note == Some(Note::SavedLoginRejected) {
+        Screen::Welcome {
+            saved_login_rejected,
+        } => {
+            if *saved_login_rejected {
                 for row in wrap("Your saved login stopped working. Sign in again.", width) {
                     lines.push(pad(Line::styled(row, dim)));
                 }
@@ -176,7 +170,7 @@ fn body(onboarding: &Onboarding, theme: &Theme, width: usize) -> Vec<Line<'stati
             lines.push(pad(Line::styled("Playback needs Spotify Premium.", dim)));
         }
         Screen::Waiting { url, .. } => {
-            lines.push(hang(spinner, "Waiting for you to approve in the browser"));
+            lines.push(pad("Waiting for you to approve in the browser"));
             lines.push(Line::default());
             lines.push(pad(Line::styled(
                 "Browser didn't open? Copy the link with c,",
@@ -197,7 +191,7 @@ fn body(onboarding: &Onboarding, theme: &Theme, width: usize) -> Vec<Line<'stati
             ));
         }
         Screen::Connecting => {
-            lines.push(hang(spinner, "Connecting…"));
+            lines.push(pad("Connecting…"));
         }
         Screen::Failed { failure } => {
             let (message, detail) = match failure {
@@ -298,25 +292,12 @@ mod tests {
 
     use super::*;
 
-    fn render(width: u16, height: u16, onboarding: &Onboarding) -> String {
-        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-        terminal
-            .draw(|frame| draw(frame, onboarding, &Theme::default()))
-            .unwrap();
-        let buffer = terminal.backend().buffer();
-        let mut text = String::new();
-        for y in 0..buffer.area.height {
-            for x in 0..buffer.area.width {
-                text.push_str(buffer[(x, y)].symbol());
-            }
-            text.push('\n');
-        }
-        text
-    }
-
     #[test]
     fn tiny_terminal_draws_without_panic() {
         let (onboarding, _) = Onboarding::new(None);
-        render(30, 8, &onboarding);
+        let mut terminal = Terminal::new(TestBackend::new(30, 8)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &onboarding, &Theme::default()))
+            .unwrap();
     }
 }
