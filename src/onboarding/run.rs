@@ -136,7 +136,6 @@ pub async fn run(
     }
 }
 
-/// Aborts the sign-in task and waits until it is gone, so its listener has released the port.
 async fn stop(task: &mut Option<JoinHandle<()>>) {
     if let Some(task) = task.take() {
         task.abort();

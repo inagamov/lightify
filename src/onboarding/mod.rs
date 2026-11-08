@@ -121,7 +121,6 @@ impl Onboarding {
         }
     }
 
-    /// Whether the "link copied" confirmation is showing.
     pub fn copied(&self) -> bool {
         self.copied_until.is_some()
     }
@@ -241,7 +240,6 @@ fn on_player(onboarding: &mut Onboarding, result: Result<(), StartFailure>) -> V
             Vec::new()
         }
         Err(StartFailure::NoPremium) => {
-            // replaying the same account can't succeed, so retry offers another sign-in
             onboarding.retry = Retry::SignIn;
             onboarding.fail(Failure::NoPremium);
             Vec::new()
