@@ -283,8 +283,8 @@ fn normal_key(key: KeyEvent, prefix: &mut Option<char>) -> Option<Action> {
             *prefix = Some(c);
             None
         }
-        KeyCode::Char('h') => Some(Action::FocusSidebar),
-        KeyCode::Char('l') => Some(Action::FocusMain),
+        KeyCode::Char('h') | KeyCode::Left => Some(Action::FocusSidebar),
+        KeyCode::Char('l') | KeyCode::Right => Some(Action::FocusMain),
         KeyCode::Enter => Some(Action::Select),
         KeyCode::Char(' ') => Some(Action::PlayPause),
         KeyCode::Char('n') => Some(Action::Next),
