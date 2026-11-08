@@ -22,6 +22,7 @@ type Client = BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointN
 pub struct AuthRequest {
     pub url: String,
     verifier: PkceCodeVerifier,
+    state: CsrfToken,
     client_id: String,
 }
 
@@ -63,7 +64,7 @@ fn client(client_id: &str) -> Client {
 
 pub fn authorize(client_id: &str) -> AuthRequest {
     let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
-    let (url, _csrf) = client(client_id)
+    let (url, state) = client(client_id)
         .authorize_url(CsrfToken::new_random)
         .add_scopes(SCOPES.iter().map(|s| Scope::new((*s).to_string())))
         .set_pkce_challenge(challenge)
@@ -73,11 +74,12 @@ pub fn authorize(client_id: &str) -> AuthRequest {
     AuthRequest {
         url: url.to_string(),
         verifier,
+        state,
         client_id: client_id.to_string(),
     }
 }
 
-pub fn parse_callback(request_line: &str) -> Callback {
+pub fn parse_callback(request_line: &str, expected_state: &str) -> Callback {
     let Some(target) = request_line.split_whitespace().nth(1) else {
         return Callback::NotLogin;
     };
@@ -87,14 +89,27 @@ pub fn parse_callback(request_line: &str) -> Callback {
     }
 
     let mut code = None;
+    let mut error = false;
+    let mut state_matches = false;
     for (key, value) in form_urlencoded::parse(query.as_bytes()) {
         match key.as_ref() {
-            "error" => return Callback::Denied,
+            "error" => error = true,
             "code" => code = Some(value.into_owned()),
+            "state" => state_matches = same(value.as_bytes(), expected_state.as_bytes()),
             _ => {}
         }
     }
+    if !state_matches {
+        return Callback::NotLogin;
+    }
+    if error {
+        return Callback::Denied;
+    }
     code.map_or(Callback::NotLogin, Callback::Code)
+}
+
+fn same(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0, |diff, (x, y)| diff | (x ^ y)) == 0
 }
 
 pub fn response(page: Option<Page>) -> String {
@@ -197,6 +212,7 @@ pub async fn listen() -> Result<TcpListener, SignInError> {
 pub async fn sign_in(listener: TcpListener, request: AuthRequest) -> Result<String, SignInError> {
     let AuthRequest {
         verifier,
+        state,
         client_id,
         ..
     } = request;
@@ -211,7 +227,7 @@ pub async fn sign_in(listener: TcpListener, request: AuthRequest) -> Result<Stri
             }
         };
 
-        match parse_callback(&line) {
+        match parse_callback(&line, state.secret()) {
             Callback::NotLogin => respond(&mut stream, None).await,
             Callback::Denied => {
                 respond(&mut stream, Some(Page::Cancelled)).await;
@@ -279,7 +295,7 @@ mod tests {
     #[test]
     fn code_is_read_from_login_redirect() {
         assert_eq!(
-            parse_callback("GET /login?code=abc&state=x HTTP/1.1"),
+            parse_callback("GET /login?code=abc&state=x HTTP/1.1", "x"),
             Callback::Code("abc".into())
         );
     }
@@ -287,15 +303,26 @@ mod tests {
     #[test]
     fn error_param_means_denied() {
         assert_eq!(
-            parse_callback("GET /login?error=access_denied&state=x HTTP/1.1"),
+            parse_callback("GET /login?error=access_denied&state=x HTTP/1.1", "x"),
             Callback::Denied
         );
     }
 
     #[test]
+    fn wrong_or_missing_state_is_ignored() {
+        for line in [
+            "GET /login?code=abc&state=y HTTP/1.1",
+            "GET /login?code=abc HTTP/1.1",
+            "GET /login?error=access_denied HTTP/1.1",
+        ] {
+            assert_eq!(parse_callback(line, "x"), Callback::NotLogin, "{line}");
+        }
+    }
+
+    #[test]
     fn non_login_paths_are_ignored() {
         assert_eq!(
-            parse_callback("GET /favicon.ico HTTP/1.1"),
+            parse_callback("GET /favicon.ico HTTP/1.1", "x"),
             Callback::NotLogin
         );
         assert!(response(None).starts_with("HTTP/1.1 404"));
