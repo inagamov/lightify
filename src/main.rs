@@ -291,8 +291,7 @@ fn normal_key(key: KeyEvent, prefix: &mut Option<char>) -> Option<Action> {
         KeyCode::Char('N') => Some(Action::Prev),
         KeyCode::Char('>') => Some(Action::SeekForward),
         KeyCode::Char('<') => Some(Action::SeekBackward),
-        // TODO: move to a group (because VolumeUp needs shift and VolumeDown does not)
-        KeyCode::Char('+') => Some(Action::VolumeUp),
+        KeyCode::Char('=') | KeyCode::Char('+') => Some(Action::VolumeUp),
         KeyCode::Char('-') => Some(Action::VolumeDown),
         KeyCode::Char('R') => Some(Action::Refresh),
         KeyCode::Char('s') => Some(Action::FocusSearch),

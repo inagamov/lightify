@@ -35,7 +35,7 @@ pub const KEYBINDINGS: &[(&str, &[Binding])] = &[
             bind("space", "play / pause"),
             bind("n / N", "next / previous track"),
             bind("> / <", "seek forward / back"),
-            bind("+ / -", "volume up / down"),
+            bind("= / -", "volume up / down"),
         ],
     ),
     (
