@@ -604,6 +604,9 @@ fn select_playlist(app: &mut App) -> Vec<Effect> {
         return Vec::new();
     };
     app.focus = Focus::Main;
+    if app.is_showing(&id) && !app.tracks.is_empty() {
+        return Vec::new();
+    }
     request_tracks(app, id)
 }
 
