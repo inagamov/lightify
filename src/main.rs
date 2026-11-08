@@ -251,6 +251,7 @@ fn key_to_action(key: KeyEvent, mode: Mode, prefix: &mut Option<char>) -> Option
 
 fn prefixed_key(first: char, key: KeyEvent) -> Option<Action> {
     match (first, key.code) {
+        ('g', KeyCode::Char('g')) => Some(Action::GoTop),
         ('z', KeyCode::Char('t')) => Some(Action::ScrollCursorTop),
         ('z', KeyCode::Char('z')) => Some(Action::ScrollCursorCenter),
         ('z', KeyCode::Char('b')) => Some(Action::ScrollCursorBottom),
@@ -269,11 +270,9 @@ fn normal_key(key: KeyEvent, prefix: &mut Option<char>) -> Option<Action> {
         KeyCode::Char(c) if c.is_ascii_digit() => Some(Action::Digit(c as u8 - b'0')),
         KeyCode::Char('j') | KeyCode::Down => Some(Action::MoveDown),
         KeyCode::Char('k') | KeyCode::Up => Some(Action::MoveUp),
-        // TODO: switch to 'gg' (needs multi-key keymap)
-        KeyCode::Char('g') => Some(Action::GoTop),
         KeyCode::Char('G') => Some(Action::GoBottom),
-        KeyCode::Char('z') => {
-            *prefix = Some('z');
+        KeyCode::Char(c @ ('g' | 'z')) => {
+            *prefix = Some(c);
             None
         }
         KeyCode::Char('h') => Some(Action::FocusSidebar),

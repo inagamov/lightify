@@ -364,7 +364,10 @@ pub fn update_action(app: &mut App, action: Action) -> Vec<Effect> {
         Action::ScrollCursorBottom => scroll_cursor(app, count, Align::Bottom),
         Action::GoTop => {
             let (state, len) = focused_list(app);
-            state.move_by(len, isize::MIN);
+            match count {
+                Some(row) => state.select_row(len, row),
+                None => state.move_by(len, isize::MIN),
+            }
             load_more_if_near_end(app)
         }
         Action::GoBottom => {
